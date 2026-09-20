@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-20",
+  "thread_id": "01a0bdf7-4a9a-7f82-a8cb-4c960ff9fa81",
+  "managed_session": "verify33",
+  "pane": "%5",
+  "target_host": "local-33",
+  "totals": {
+    "duration_ms": 255505,
+    "mcp_calls": 25,
+    "mcp_visible_duration_ms": 26789,
+    "input_tokens": 1344659,
+    "cached_input_tokens": 1300096,
+    "uncached_input_tokens": 44563,
+    "output_tokens": 4621,
+    "reasoning_output_tokens": 1363,
+    "total_tokens": 1349280
+  },
+  "turns": [
+    {
+      "name": "filesystem_inventory",
+      "turn_id": "01a0bdf7-5153-7783-bf39-45c5542846ad",
+      "duration_ms": 32845,
+      "time_to_first_token_ms": 3732,
+      "mcp_calls": 6,
+      "mcp_visible_duration_ms": 9219,
+      "input_tokens": 306434,
+      "cached_input_tokens": 281728,
+      "uncached_input_tokens": 24706,
+      "output_tokens": 894,
+      "reasoning_output_tokens": 152,
+      "total_tokens": 307328,
+      "result": "completed"
+    },
+    {
+      "name": "shared331_scan_human_override",
+      "turn_id": "01a0bdf7-f713-7111-9ec6-aa859bfb2dd6",
+      "duration_ms": 41660,
+      "time_to_first_token_ms": 3309,
+      "mcp_calls": 6,
+      "mcp_visible_duration_ms": 3451,
+      "input_tokens": 263415,
+      "cached_input_tokens": 258688,
+      "uncached_input_tokens": 4727,
+      "output_tokens": 1117,
+      "reasoning_output_tokens": 481,
+      "total_tokens": 264532,
+      "result": "human_override"
+    },
+    {
+      "name": "root_deep_analysis",
+      "turn_id": "01a0bdf9-0172-7230-8548-42920f620b06",
+      "duration_ms": 181000,
+      "time_to_first_token_ms": 6357,
+      "mcp_calls": 13,
+      "mcp_visible_duration_ms": 14119,
+      "input_tokens": 774810,
+      "cached_input_tokens": 759680,
+      "uncached_input_tokens": 15130,
+      "output_tokens": 2610,
+      "reasoning_output_tokens": 730,
+      "total_tokens": 777420,
+      "result": "completed"
+    }
+  ],
+  "verified_behaviors": {
+    "initial_lease_acquired": true,
+    "human_ctrl_c_revoked_lease": true,
+    "same_turn_writes_stopped": true,
+    "new_user_turn_reauthorized": true,
+    "read_only_analysis_completed": true
+  },
+  "optimization_targets": {
+    "basic_check_max_mcp_calls": 3,
+    "deep_analysis_max_mcp_calls": 5,
+    "deep_analysis_max_model_samples": 6,
+    "human_override_return_seconds": 10,
+    "max_uncached_input_tokens_per_turn": 10000,
+    "max_total_input_tokens_per_turn": 250000
+  }
+}

@@ -280,6 +280,10 @@ Bridge 不接受没有近期 READ、明确 pane、有效授权和有效 lease �
 
 目标是让 Codex 面对结构化执行现场，而不是一整块字符快照。
 
+Command Block 只能由 Bridge 本地元数据或目标环境显式安装的 shell integration
+产生。Bridge 不得为推测命令边界或退出码而注入包装脚本、marker、临时
+文件或 TTY 协议。没有显式 integration 时，只记录可验证的 pane 快照与输入事件。
+
 ### Command Block
 
 ```json
@@ -385,6 +389,12 @@ stale generation 拒绝和审计链路 9 项检查全部通过。详见
 Observation tools；Action 必须显式启用，且 MCP 不暴露 lease 获取。
 MCP stdio → Unix socket → Bridge → 授权 tmux pane 端到端验证已通过。详见
 [最小 MCP Server](mcp-server.md)。
+
+**2026-09-20 真实运维性能基线**：使用 `verify33` 完成 local-33 磁盘检查、
+Human Override、后续用户 turn 重新授权和 root 只读下钻。三个回合共耗时
+255.505 秒、25 次 MCP 调用、处理 1,344,659 input tokens。Bridge RPC 为
+毫秒级，主要优化空间是任务块、增量读取、审批合并和 AI Context Policy。
+详见 [检查 local-33 磁盘占用 03 实操基线](baseline-live-ops-03.md)。
 
 ## 风险与开放问题
 

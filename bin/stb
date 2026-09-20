@@ -8,9 +8,16 @@ import pathlib
 import socket
 import subprocess
 import sys
+import time
 
 
 DEFAULT_BRIDGE_SOCKET = pathlib.Path("/tmp/shared-terminal-bridge.sock")
+DEFAULT_EVENT_SOCKET = pathlib.Path("/tmp/shared-terminal-events.sock")
+DEFAULT_STATE_FILE = pathlib.Path("/tmp/shared-terminal-bridge-state.json")
+DEFAULT_PID_FILE = pathlib.Path("/tmp/shared-terminal-bridge.pid")
+DEFAULT_LOG_FILE = pathlib.Path("/tmp/shared-terminal-bridge.log")
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
+BRIDGE_SCRIPT = PROJECT_ROOT / "bridge" / "local_bridge.py"
 SESSION_FORMAT = "\t".join(
     [
         "#{session_name}",
@@ -120,6 +127,113 @@ def bridge_call(socket_path, method, params=None):
     return response["result"]
 
 
+def bridge_available(socket_path):
+    try:
+        bridge_call(socket_path, "terminal_session_list")
+        return True
+    except RuntimeError:
+        return False
+
+
+def read_pid():
+    try:
+        return int(DEFAULT_PID_FILE.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def process_command(pid):
+    if pid is None:
+        return ""
+    result = subprocess.run(
+        ["ps", "-p", str(pid), "-o", "command="],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def bridge_process_running():
+    pid = read_pid()
+    command = process_command(pid)
+    return bool(pid and str(BRIDGE_SCRIPT) in command), pid
+
+
+def start_bridge_daemon(tmux_socket, bridge_socket):
+    if bridge_available(bridge_socket):
+        bridge_call(bridge_socket, "install_human_binding")
+        return {"started": False, "pid": read_pid(), "already_running": True}
+    running, pid = bridge_process_running()
+    if running:
+        raise RuntimeError(
+            f"Bridge 进程 {pid} 正在运行，但 socket 不可用；请查看 {DEFAULT_LOG_FILE}"
+        )
+
+    bootstrap = None
+    probe = tmux(tmux_socket, "list-sessions", capture=True, check=False)
+    if probe.returncode != 0:
+        bootstrap = f"__stb_bootstrap_{os.getpid()}"
+        tmux(tmux_socket, "new-session", "-d", "-s", bootstrap)
+
+    log_file = DEFAULT_LOG_FILE.open("a", encoding="utf-8")
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            str(BRIDGE_SCRIPT),
+            "serve",
+            "--tmux-socket",
+            tmux_socket,
+            "--control-socket",
+            str(bridge_socket),
+            "--event-socket",
+            str(DEFAULT_EVENT_SOCKET),
+            "--state-file",
+            str(DEFAULT_STATE_FILE),
+            "--allow-session-management",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=log_file,
+        stderr=log_file,
+        start_new_session=True,
+        text=True,
+    )
+    log_file.close()
+    DEFAULT_PID_FILE.write_text(f"{process.pid}\n", encoding="utf-8")
+    os.chmod(DEFAULT_PID_FILE, 0o600)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if bridge_available(bridge_socket):
+            bridge_call(bridge_socket, "install_human_binding")
+            return {
+                "started": True,
+                "pid": process.pid,
+                "already_running": False,
+                "bootstrap": bootstrap,
+            }
+        if process.poll() is not None:
+            break
+        time.sleep(0.05)
+    if bootstrap:
+        tmux(tmux_socket, "kill-session", "-t", bootstrap, check=False)
+    raise RuntimeError(f"Bridge 启动失败；请查看 {DEFAULT_LOG_FILE}")
+
+
+def stop_bridge_daemon():
+    running, pid = bridge_process_running()
+    if not running:
+        DEFAULT_PID_FILE.unlink(missing_ok=True)
+        return False
+    os.kill(pid, 15)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if not process_command(pid):
+            DEFAULT_PID_FILE.unlink(missing_ok=True)
+            return True
+        time.sleep(0.05)
+    raise RuntimeError(f"Bridge 进程 {pid} 未在 5 秒内退出")
+
+
 def print_sessions(sessions, as_json=False):
     if as_json:
         print(json.dumps(sessions, ensure_ascii=False, indent=2))
@@ -171,7 +285,16 @@ def parser():
             "  stb enter my-session\n"
             "  stb create my-session --cwd /path/to/project --enter\n"
             "  stb lease my-session\n"
+            "  stb approvals\n"
+            "  stb jobs\n"
+            "  stb job job_a1b2c3d4e5f6\n"
+            "  stb waits\n"
+            "  stb cancel-wait wait_a1b2c3d4e5f6\n"
+            "  stb watch job_a1b2c3d4e5f6\n"
+            "  stb approve lr_a1b2c3d4e5f6\n"
+            "  stb reject lr_a1b2c3d4e5f6\n"
             "  stb stop my-session\n\n"
+            "  stb daemon status\n"
             "提示：MCP 创建会话后，直接执行 stb enter <会话名称> 即可进入。"
         ),
     )
@@ -253,6 +376,82 @@ def parser():
     release.add_argument(
         "generation", type=int, metavar="代次", help="lease 返回的 generation"
     )
+
+    approvals = configure_help(
+        subparsers.add_parser("approvals", help="列出长任务待批准请求")
+    )
+    approvals.add_argument(
+        "--status",
+        choices=("PENDING", "APPROVED", "REJECTED", "CONSUMED", "EXPIRED"),
+        metavar="状态",
+        help="按状态筛选（默认显示全部）",
+    )
+    approvals.add_argument(
+        "--json", action="store_true", help="输出机器可读的 JSON"
+    )
+
+    approve = configure_help(
+        subparsers.add_parser("approve", help="批准一个长任务请求")
+    )
+    approve.add_argument("request_id", metavar="请求ID", help="例如 lr_a1b2c3d4e5f6")
+
+    reject = configure_help(
+        subparsers.add_parser("reject", help="拒绝一个长任务请求")
+    )
+    reject.add_argument("request_id", metavar="请求ID", help="例如 lr_a1b2c3d4e5f6")
+
+    jobs = configure_help(
+        subparsers.add_parser("jobs", help="列出 Bridge 监测的终端任务")
+    )
+    jobs.add_argument("--json", action="store_true", help="输出机器可读的 JSON")
+    jobs.add_argument(
+        "--state",
+        choices=("RUNNING", "COMPLETED", "INTERRUPTED_BY_HUMAN", "NEEDS_ATTENTION", "HUMAN_DECISION_REQUIRED"),
+        metavar="状态",
+        help="按任务状态筛选",
+    )
+
+    job = configure_help(
+        subparsers.add_parser("job", help="查看一个终端任务的状态和增量输出")
+    )
+    job.add_argument("job_id", metavar="任务ID", help="例如 job_a1b2c3d4e5f6")
+
+    watch = configure_help(
+        subparsers.add_parser("watch", help="本地等待终端任务状态变化")
+    )
+    watch.add_argument("job_id", metavar="任务ID", help="例如 job_a1b2c3d4e5f6")
+    watch.add_argument(
+        "--seconds", type=int, default=600, metavar="秒",
+        help="最长等待秒数（1-600，默认 600）",
+    )
+
+    wait = configure_help(
+        subparsers.add_parser("wait", help="等待终端任务（watch 的同义命令）")
+    )
+    wait.add_argument("job_id", metavar="任务ID", help="例如 job_a1b2c3d4e5f6")
+    wait.add_argument("--seconds", type=int, default=600, metavar="秒", help="最长等待秒数（1-600）")
+
+    configure_help(subparsers.add_parser("waits", help="列出当前活动的等待请求"))
+
+    cancel_wait = configure_help(
+        subparsers.add_parser("cancel-wait", help="取消模型等待但不停止终端命令")
+    )
+    cancel_wait.add_argument("wait_id", metavar="等待ID", help="例如 wait_a1b2c3d4e5f6")
+
+    interrupt = configure_help(
+        subparsers.add_parser("interrupt", help="向终端任务发送 Agent Ctrl+C")
+    )
+    interrupt.add_argument("job_id", metavar="任务ID", help="例如 job_a1b2c3d4e5f6")
+
+    daemon = configure_help(
+        subparsers.add_parser("daemon", help="启动、查看或停止后台 Bridge")
+    )
+    daemon.add_argument(
+        "action",
+        choices=("start", "status", "stop", "logs"),
+        metavar="操作",
+        help="start / status / stop / logs",
+    )
     return root
 
 
@@ -276,11 +475,28 @@ def main():
         if args.command == "list":
             print_sessions(managed_sessions(args.tmux_socket), args.json)
         elif args.command == "create":
-            result = bridge_call(
-                args.bridge_socket,
-                "terminal_session_create",
-                {"name": args.name, "cwd": str(pathlib.Path(args.cwd).resolve())},
-            )
+            daemon = start_bridge_daemon(args.tmux_socket, args.bridge_socket)
+            bootstrap = daemon.get("bootstrap")
+            try:
+                result = bridge_call(
+                    args.bridge_socket,
+                    "terminal_session_create",
+                    {
+                        "name": args.name,
+                        "cwd": str(pathlib.Path(args.cwd).resolve()),
+                    },
+                )
+            finally:
+                if bootstrap:
+                    tmux(
+                        args.tmux_socket,
+                        "kill-session",
+                        "-t",
+                        bootstrap,
+                        check=False,
+                    )
+            if daemon.get("started"):
+                print(f"已自动启动 Bridge daemon（PID {daemon['pid']}）。")
             print(json.dumps(result, ensure_ascii=False, indent=2))
             if args.enter:
                 enter_session(args.tmux_socket, args.name)
@@ -333,6 +549,126 @@ def main():
                 method = "release_execution"
             result = bridge_call(args.bridge_socket, method, params)
             print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif args.command == "approvals":
+            params = {}
+            if args.status:
+                params["status"] = args.status
+            result = bridge_call(
+                args.bridge_socket, "terminal_long_run_requests", params
+            )
+            requests = result.get("requests", [])
+            if args.json:
+                print(json.dumps(requests, ensure_ascii=False, indent=2))
+            elif not requests:
+                print("当前没有长任务批准请求。")
+            else:
+                print(f"长任务批准请求：{len(requests)} 个")
+                for request in requests:
+                    print(f"\n  请求 ID：{request['request_id']}")
+                    print(f"  状态：{request['status']}")
+                    print(f"  面板：{request['pane']}")
+                    print(f"  资源类型：{request['resource_class']}")
+                    print(
+                        f"  预计/空闲/总预算：{request['expected_duration_ms']} / "
+                        f"{request['idle_budget_ms']} / {request['total_budget_ms']} ms"
+                    )
+                    print("  完整命令：")
+                    print(f"    {request['command']}")
+                print("\n批准：stb approve <请求ID>")
+                print("拒绝：stb reject <请求ID>")
+        elif args.command in ("approve", "reject"):
+            result = bridge_call(
+                args.bridge_socket,
+                "terminal_long_run_decide",
+                {
+                    "request_id": args.request_id,
+                    "decision": args.command,
+                },
+            )
+            verb = "批准" if args.command == "approve" else "拒绝"
+            print(f"已{verb}长任务请求：{args.request_id}")
+            print("完整命令：")
+            print(result["command"])
+        elif args.command == "jobs":
+            params = {}
+            if args.state:
+                params["state"] = args.state
+            result = bridge_call(args.bridge_socket, "terminal_job_list", params)
+            jobs = result.get("jobs", [])
+            if args.json:
+                print(json.dumps(jobs, ensure_ascii=False, indent=2))
+            elif not jobs:
+                print("当前没有终端任务。")
+            else:
+                print(f"终端任务：{len(jobs)} 个")
+                for item in jobs:
+                    elapsed = item.get("elapsed_ms", 0) // 1000
+                    progress = f"，进度 {item['progress']}" if item.get("progress") else ""
+                    print(
+                        f"  {item['job_id']}  {item['state']}  "
+                        f"pane={item['pane']}  已运行 {elapsed}s{progress}"
+                    )
+                print("\n详情：stb job <任务ID>")
+        elif args.command in ("job", "watch", "wait"):
+            method = "terminal_job_status"
+            params = {"job_id": args.job_id}
+            if args.command in ("watch", "wait"):
+                method = "terminal_wait_job"
+                params["wait_ms"] = args.seconds * 1000
+            result = bridge_call(args.bridge_socket, method, params)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif args.command == "waits":
+            result = bridge_call(args.bridge_socket, "terminal_wait_list")
+            print(json.dumps(result.get("waits", []), ensure_ascii=False, indent=2))
+        elif args.command == "cancel-wait":
+            result = bridge_call(
+                args.bridge_socket,
+                "terminal_cancel_wait",
+                {"wait_id": args.wait_id},
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif args.command == "interrupt":
+            job = bridge_call(
+                args.bridge_socket,
+                "terminal_job_status",
+                {"job_id": args.job_id},
+            )
+            result = bridge_call(
+                args.bridge_socket,
+                "terminal_interrupt",
+                {"pane": job["pane"], "generation": job["generation"]},
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif args.command == "daemon":
+            if args.action == "start":
+                result = start_bridge_daemon(args.tmux_socket, args.bridge_socket)
+                if result["already_running"]:
+                    print("Bridge daemon 已在运行。")
+                else:
+                    print(f"Bridge daemon 已启动，PID：{result['pid']}")
+            elif args.action == "status":
+                running, pid = bridge_process_running()
+                available = bridge_available(args.bridge_socket)
+                print(f"进程：{'运行中' if running else '未运行'}")
+                if pid:
+                    print(f"PID：{pid}")
+                print(f"控制 socket：{'可用' if available else '不可用'}")
+                print(f"日志：{DEFAULT_LOG_FILE}")
+                if not running or not available:
+                    return 1
+            elif args.action == "stop":
+                if stop_bridge_daemon():
+                    print("Bridge daemon 已停止。")
+                else:
+                    print("Bridge daemon 未运行。")
+            elif args.action == "logs":
+                if DEFAULT_LOG_FILE.exists():
+                    lines = DEFAULT_LOG_FILE.read_text(
+                        encoding="utf-8", errors="replace"
+                    ).splitlines()[-50:]
+                    print("\n".join(lines))
+                else:
+                    print("暂无 Bridge 日志。")
         return 0
     except (RuntimeError, subprocess.CalledProcessError) as error:
         print(f"错误：{error}", file=sys.stderr)

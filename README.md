@@ -79,6 +79,11 @@ daemon 单实例锁、tmux server UUID 校验和 pane ID 复用隔离已通过�
 MCP 创建托管 tmux session 与本地一键进入/管理已实现：
 [托管 tmux Session 与 stb 快捷命令](docs/managed-sessions.md)。
 
+确定性的 AI Context Policy 与纯本地 `terminal_task_block` 已实现：模型优先读取 cursor
+增量，Bridge 在内容进入上下文前清理终端噪声、折叠重复并强制字节/行预算；task
+block 只在 daemon 内维护任务和观察元数据，每条终端命令仍必须显式提交。详见
+[AI Context Policy v0.2](docs/ai-context-policy.md)。
+
 完整的实施阶段、接口分层、Pane ACL、Execution Lease、审计、AI Context Policy
 和 Command Block 演进见 [后续路线图](docs/roadmap.md)。
 
@@ -187,6 +192,7 @@ shared-terminal-bridge/
 │   └── server.py
 ├── docs/
 │   ├── api-v0.1.md
+│   ├── ai-context-policy.md
 │   ├── architecture.md
 │   ├── local-bridge-prototype.md
 │   ├── mcp-server.md

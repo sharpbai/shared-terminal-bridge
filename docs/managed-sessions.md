@@ -45,8 +45,11 @@ history-limit 100000
 mouse on
 ```
 
-配置使用 session/window 作用域，不修改普通 tmux session。同时安装
-`after-new-window` hook，以便托管 session 后续新建的 window 也设为 10 万行。
+鼠标配置使用 session 作用域。由于 tmux 在 pane 创建时固化 `history-limit`，Bridge 会在
+创建首个托管 session 前将当前 tmux server 的全局 `history-limit` 设为 100000。因此已有
+普通 pane 不会改变，但同一 server 此后新建的普通 pane 也会继承 10 万行历史。
+这样可以保证托管 session 的初始 pane 和后续 window 都真实获得 10 万行，而不是只显示
+一个创建后才写入、对现有 pane 无效的 option。
 `stb list` 和 `stb info` 会返回实际 `history_limit` 和 `mouse` 值。
 
 ## 一键进入
@@ -76,8 +79,43 @@ MCP 创建 session 并返回 `name` 后，在项目目录执行：
 ./stb enter NAME
 ./stb lease NAME
 ./stb release NAME GENERATION
+./stb approvals
+./stb approvals --status PENDING
+./stb approve REQUEST_ID
+./stb reject REQUEST_ID
+./stb jobs
+./stb jobs --state RUNNING
+./stb job JOB_ID
+./stb waits
+./stb cancel-wait WAIT_ID
+./stb wait JOB_ID
+./stb watch JOB_ID
+./stb interrupt JOB_ID
 ./stb stop NAME
 ```
+
+`stb create` 发现默认 Bridge socket 不存在时会自动在后台启动 daemon，因此无需先手工
+执行 `bridge/local_bridge.py serve`。后台进程可通过以下命令管理：
+
+```bash
+stb daemon start
+stb daemon status
+stb daemon logs
+stb daemon stop
+```
+
+默认运行文件：
+
+```text
+/tmp/shared-terminal-bridge.sock
+/tmp/shared-terminal-events.sock
+/tmp/shared-terminal-bridge-state.json
+/tmp/shared-terminal-bridge.pid
+/tmp/shared-terminal-bridge.log
+```
+
+如果 tmux server 尚不存在，自动启动会创建一个短暂 bootstrap session；目标托管 session
+创建成功或失败后都会清理 bootstrap。
 
 `create` 默认通过 Bridge 创建，以便同步动态 ACL。`stop` 默认也通过
 Bridge，以便移除 ACL 并撤销 lease。

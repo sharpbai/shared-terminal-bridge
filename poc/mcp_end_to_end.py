@@ -287,13 +287,69 @@ def main():
             },
         )
         active_after_agent = bridge_call("execution_status", {"pane": pane})
+        task_submit = mcp_request(
+            mcp,
+            {
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": modern_params(
+                    name="terminal_task_block",
+                    arguments={
+                        "pane": pane,
+                        "generation": generation,
+                        "commands": [
+                            "printf 'TASK_BLOCK_ALPHA\\n'",
+                            "printf 'TASK_BLOCK_BETA\\n'",
+                        ],
+                    },
+                ),
+            },
+        )
+        block_id = task_submit["result"]["structuredContent"]["result"]["block_id"]
+        explicit_task_submits = []
+        for request_id, command in enumerate(
+            ("printf 'TASK_BLOCK_ALPHA\\n'", "printf 'TASK_BLOCK_BETA\\n'"),
+            11,
+        ):
+            explicit_task_submits.append(mcp_request(
+                mcp,
+                {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "tools/call",
+                    "params": modern_params(
+                        name="terminal_submit",
+                        arguments={
+                            "pane": pane,
+                            "generation": generation,
+                            "text": command,
+                            "expected_duration_ms": 30_000,
+                            "resource_class": "normal",
+                        },
+                    ),
+                },
+            ))
+            time.sleep(0.1)
+        task_observe = mcp_request(
+            mcp,
+            {
+                "jsonrpc": "2.0",
+                "id": 13,
+                "method": "tools/call",
+                "params": modern_params(
+                    name="terminal_task_observe",
+                    arguments={"block_id": block_id},
+                ),
+            },
+        )
         emit_human_event(pane)
         revoked = wait_for_revoked(pane)
         stale = mcp_request(
             mcp,
             {
                 "jsonrpc": "2.0",
-                "id": 10,
+                "id": 50,
                 "method": "tools/call",
                 "params": modern_params(
                     name="terminal_type",
@@ -328,7 +384,9 @@ def main():
                 "terminal_list",
                 "get_active_pane",
                 "terminal_read",
+                "terminal_read_delta",
                 "terminal_state",
+                "terminal_wait_delta",
             ],
             "state_crossed_mcp_and_bridge": (
                 state_payload.get("result", {}).get("pane") == pane
@@ -349,7 +407,21 @@ def main():
                     "terminal_type",
                     "terminal_key",
                     "terminal_interrupt",
+                    "terminal_task_block",
+                    "terminal_task_observe",
                 )
+            ),
+            "task_block_is_local_and_commands_are_explicit": (
+                task_submit["result"]["isError"] is False
+                and task_submit["result"]["structuredContent"]["result"]["writes_to_pane"]
+                is False
+                and all(not item["result"]["isError"] for item in explicit_task_submits)
+                and task_observe["result"]["structuredContent"]["result"]["state"]
+                == "ACTIVE"
+                and "TASK_BLOCK_ALPHA"
+                in task_observe["result"]["structuredContent"]["result"]["content"]
+                and "TASK_BLOCK_BETA"
+                in task_observe["result"]["structuredContent"]["result"]["content"]
             ),
             "lease_acquisition_not_exposed": (
                 "acquire_execution" not in action_names
@@ -381,6 +453,8 @@ def main():
                     "TYPE",
                     "KEY",
                     "AGENT_INTERRUPT",
+                    "TASK_BLOCK_CREATE",
+                    "TASK_BLOCK_OBSERVE",
                     "HUMAN_INTERRUPT",
                     "LEASE_REVOKE",
                     "ACTION_DENY",
@@ -389,6 +463,16 @@ def main():
         }
         print("Full MCP read/write end-to-end checks:")
         print(json.dumps(checks, indent=2))
+        if not checks["task_block_is_local_and_commands_are_explicit"]:
+            print("Task block diagnostic:")
+            print(
+                json.dumps(
+                    task_observe["result"]["structuredContent"],
+                    indent=2,
+                )
+            )
+            print("Pane tail diagnostic:")
+            print(pane_content[-4000:])
         if all(checks.values()):
             print("\nPASS: MCP stdio reached the authorized tmux pane read-only.")
             print("PASS: Action tools were absent and rejected by default.")
