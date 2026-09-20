@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+"""管理并进入 Shared Terminal Bridge 托管的 tmux 会话。"""
+
+import argparse
+import json
+import os
+import pathlib
+import socket
+import subprocess
+import sys
+
+
+DEFAULT_BRIDGE_SOCKET = pathlib.Path("/tmp/shared-terminal-bridge.sock")
+SESSION_FORMAT = "\t".join(
+    [
+        "#{session_name}",
+        "#{session_id}",
+        "#{session_windows}",
+        "#{session_attached}",
+        "#{@shared_terminal_managed}",
+        "#{@shared_terminal_id}",
+        "#{@shared_terminal_created_at}",
+        "#{history_limit}",
+        "#{mouse}",
+    ]
+)
+
+
+class ChineseArgumentParser(argparse.ArgumentParser):
+    def format_help(self):
+        help_text = super().format_help()
+        if help_text.startswith("usage:"):
+            help_text = "用法：" + help_text[len("usage:"):]
+        return help_text
+
+
+def tmux(socket_name, *arguments, capture=False, check=True):
+    return subprocess.run(
+        ["tmux", "-L", socket_name, *arguments],
+        check=check,
+        capture_output=capture,
+        text=True,
+    )
+
+
+def managed_sessions(socket_name):
+    result = tmux(
+        socket_name,
+        "list-sessions",
+        "-F",
+        SESSION_FORMAT,
+        capture=True,
+        check=False,
+    )
+    sessions = []
+    for line in result.stdout.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 9 or fields[4] != "1":
+            continue
+        (
+            name,
+            session_id,
+            windows,
+            attached,
+            _,
+            managed_id,
+            created_at,
+            history_limit,
+            mouse,
+        ) = fields
+        pane = tmux(
+            socket_name,
+            "display-message",
+            "-p",
+            "-t",
+            name,
+            "#{pane_id}",
+            capture=True,
+        ).stdout.strip()
+        sessions.append(
+            {
+                "name": name,
+                "session_id": session_id,
+                "pane": pane,
+                "windows": int(windows),
+                "attached": int(attached),
+                "managed_id": managed_id,
+                "created_at": created_at,
+                "history_limit": int(history_limit),
+                "mouse": mouse == "1",
+            }
+        )
+    return sessions
+
+
+def find_session(socket_name, name):
+    return next(
+        (session for session in managed_sessions(socket_name) if session["name"] == name),
+        None,
+    )
+
+
+def bridge_call(socket_path, method, params=None):
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        client.connect(str(socket_path))
+        with client:
+            writer = client.makefile("w", encoding="utf-8")
+            reader = client.makefile("r", encoding="utf-8")
+            writer.write(json.dumps({"method": method, "params": params or {}}) + "\n")
+            writer.flush()
+            line = reader.readline()
+    except OSError as error:
+        raise RuntimeError(f"无法连接 Bridge（{socket_path}）：{error}") from error
+    if not line:
+        raise RuntimeError("Bridge 返回了空响应")
+    response = json.loads(line)
+    if not response.get("ok"):
+        raise RuntimeError(json.dumps(response["error"], ensure_ascii=False))
+    return response["result"]
+
+
+def print_sessions(sessions, as_json=False):
+    if as_json:
+        print(json.dumps(sessions, ensure_ascii=False, indent=2))
+        return
+    if not sessions:
+        print("当前没有托管的 tmux 会话。")
+        print("可使用：stb create <名称> --cwd <目录>")
+        return
+    print(f"托管的 tmux 会话：{len(sessions)} 个")
+    for session in sessions:
+        print(f"\n  {session['name']}")
+        print(f"    主面板：{session['pane']}")
+        print(f"    已连接客户端：{session['attached']}")
+        print(f"    窗口数：{session['windows']}")
+        print(f"    历史行数：{session['history_limit']}")
+        print(f"    鼠标：{'已开启' if session['mouse'] else '已关闭'}")
+        print(f"    创建时间：{session['created_at']}")
+    print("\n进入会话：stb enter <名称>")
+
+
+def print_session_info(session):
+    print(f"会话名称：{session['name']}")
+    print(f"会话 ID：{session['session_id']}")
+    print(f"托管 ID：{session['managed_id']}")
+    print(f"主面板：{session['pane']}")
+    print(f"窗口数：{session['windows']}")
+    print(f"已连接客户端：{session['attached']}")
+    print(f"历史行数：{session['history_limit']}")
+    print(f"鼠标支持：{'已开启' if session['mouse'] else '已关闭'}")
+    print(f"创建时间：{session['created_at']}")
+
+
+def configure_help(command_parser):
+    command_parser._positionals.title = "位置参数"
+    command_parser._optionals.title = "选项"
+    for action in command_parser._actions:
+        if action.dest == "help":
+            action.help = "显示帮助并退出"
+    return command_parser
+
+
+def parser():
+    root = ChineseArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "常用示例：\n"
+            "  stb list\n"
+            "  stb enter my-session\n"
+            "  stb create my-session --cwd /path/to/project --enter\n"
+            "  stb lease my-session\n"
+            "  stb stop my-session\n\n"
+            "提示：MCP 创建会话后，直接执行 stb enter <会话名称> 即可进入。"
+        ),
+    )
+    configure_help(root)
+    root.add_argument(
+        "--tmux-socket",
+        default="default",
+        metavar="名称",
+        help="tmux socket 名称（默认：default）",
+    )
+    root.add_argument(
+        "--bridge-socket",
+        type=pathlib.Path,
+        default=DEFAULT_BRIDGE_SOCKET,
+        metavar="路径",
+        help="Bridge Unix socket 路径",
+    )
+    subparsers = root.add_subparsers(
+        dest="command",
+        required=True,
+        title="可用命令",
+        metavar="命令",
+        parser_class=ChineseArgumentParser,
+    )
+
+    list_parser = configure_help(
+        subparsers.add_parser("list", help="列出所有托管会话")
+    )
+    list_parser.add_argument(
+        "--json", action="store_true", help="输出机器可读的 JSON"
+    )
+
+    create = configure_help(
+        subparsers.add_parser("create", help="通过 Bridge 创建托管会话")
+    )
+    create.add_argument("name", metavar="名称", help="新会话名称")
+    create.add_argument(
+        "--cwd", default=os.getcwd(), metavar="目录", help="会话工作目录"
+    )
+    create.add_argument(
+        "--enter", action="store_true", help="创建成功后立即进入"
+    )
+
+    enter = configure_help(
+        subparsers.add_parser("enter", help="进入或切换到托管会话")
+    )
+    enter.add_argument("name", metavar="名称", help="要进入的会话名称")
+
+    info = configure_help(
+        subparsers.add_parser("info", help="查看一个托管会话的详细信息")
+    )
+    info.add_argument("name", metavar="名称", help="会话名称")
+    info.add_argument("--json", action="store_true", help="输出机器可读的 JSON")
+
+    panes = configure_help(
+        subparsers.add_parser("panes", help="列出托管会话中的面板")
+    )
+    panes.add_argument("name", metavar="名称", help="会话名称")
+
+    stop = configure_help(
+        subparsers.add_parser("stop", help="停止并清理托管会话")
+    )
+    stop.add_argument("name", metavar="名称", help="要停止的会话名称")
+    stop.add_argument(
+        "--direct",
+        action="store_true",
+        help="Bridge 不可用时直接停止；仅限带托管标记的会话",
+    )
+
+    lease = configure_help(
+        subparsers.add_parser("lease", help="明确授予会话面板的执行租约")
+    )
+    lease.add_argument("name", metavar="名称", help="会话名称")
+
+    release = configure_help(
+        subparsers.add_parser("release", help="主动释放执行租约")
+    )
+    release.add_argument("name", metavar="名称", help="会话名称")
+    release.add_argument(
+        "generation", type=int, metavar="代次", help="lease 返回的 generation"
+    )
+    return root
+
+
+def enter_session(socket_name, name):
+    if find_session(socket_name, name) is None:
+        raise RuntimeError(f"不是托管会话或会话不存在：{name}")
+    if os.environ.get("TMUX"):
+        result = tmux(socket_name, "switch-client", "-t", name, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(f"无法切换到会话：{name}")
+        return
+    os.execvp(
+        "tmux",
+        ["tmux", "-L", socket_name, "attach-session", "-t", name],
+    )
+
+
+def main():
+    args = parser().parse_args()
+    try:
+        if args.command == "list":
+            print_sessions(managed_sessions(args.tmux_socket), args.json)
+        elif args.command == "create":
+            result = bridge_call(
+                args.bridge_socket,
+                "terminal_session_create",
+                {"name": args.name, "cwd": str(pathlib.Path(args.cwd).resolve())},
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            if args.enter:
+                enter_session(args.tmux_socket, args.name)
+        elif args.command == "enter":
+            enter_session(args.tmux_socket, args.name)
+        elif args.command == "info":
+            session = find_session(args.tmux_socket, args.name)
+            if session is None:
+                raise RuntimeError(f"不是托管会话或会话不存在：{args.name}")
+            if args.json:
+                print(json.dumps(session, ensure_ascii=False, indent=2))
+            else:
+                print_session_info(session)
+        elif args.command == "panes":
+            if find_session(args.tmux_socket, args.name) is None:
+                raise RuntimeError(f"不是托管会话或会话不存在：{args.name}")
+            result = tmux(
+                args.tmux_socket,
+                "list-panes",
+                "-t",
+                args.name,
+                "-F",
+                "#{pane_id}\t#{pane_index}\t#{pane_current_command}\t#{pane_current_path}",
+                capture=True,
+            )
+            print("面板 ID\t序号\t当前命令\t工作目录")
+            print(result.stdout, end="")
+        elif args.command == "stop":
+            session = find_session(args.tmux_socket, args.name)
+            if session is None:
+                raise RuntimeError(f"不是托管会话或会话不存在：{args.name}")
+            if args.direct:
+                tmux(args.tmux_socket, "kill-session", "-t", args.name)
+                print(f"已直接停止托管会话：{args.name}")
+            else:
+                result = bridge_call(
+                    args.bridge_socket,
+                    "terminal_session_stop",
+                    {"name": args.name},
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif args.command in ("lease", "release"):
+            session = find_session(args.tmux_socket, args.name)
+            if session is None:
+                raise RuntimeError(f"不是托管会话或会话不存在：{args.name}")
+            params = {"pane": session["pane"]}
+            method = "acquire_execution"
+            if args.command == "release":
+                params["generation"] = args.generation
+                method = "release_execution"
+            result = bridge_call(args.bridge_socket, method, params)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    except (RuntimeError, subprocess.CalledProcessError) as error:
+        print(f"错误：{error}", file=sys.stderr)
+        print("可运行 stb --help 查看中文使用说明。", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "suite": "combined_bridge",
+  "required_checks": [
+    "inventory_ok",
+    "active_client_ok",
+    "authorized_read_ok",
+    "authorized_state_ok",
+    "unauthorized_denied",
+    "private_content_not_leaked",
+    "binding_installed",
+    "active_action_allowed",
+    "agent_interrupt_not_revoke",
+    "human_event_revoked",
+    "stale_action_denied",
+    "allowed_action_reached_pane",
+    "stale_action_absent",
+    "audit_complete"
+  ],
+  "expected_lease_state": "REVOKED",
+  "expected_stale_error": "EXECUTION_LEASE_INVALID",
+  "required_audit_actions": [
+    "SERVER_START",
+    "LIST",
+    "ACTIVE",
+    "READ",
+    "STATE",
+    "ACCESS_DENY",
+    "BINDING_INSTALL",
+    "LEASE_ACQUIRE",
+    "TYPE",
+    "KEY",
+    "AGENT_INTERRUPT",
+    "HUMAN_INTERRUPT",
+    "LEASE_REVOKE",
+    "ACTION_DENY"
+  ]
+}
