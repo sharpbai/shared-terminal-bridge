@@ -1,6 +1,6 @@
 # Shared Terminal Bridge
 
-> **项目导航** · **[Shared Terminal Bridge](https://github.com/sharpbai/shared-terminal-bridge)**（核心 Bridge） · [STB-RDC](https://github.com/sharpbai/shared-terminal-bridge-rdc)（ChatGPT/RDC 远程适配器） · [系列文档](https://github.com/sharpbai/shared-terminal-bridge-docs)（设计与演进记录）
+<p align="center"><a href="https://github.com/sharpbai/shared-terminal-bridge"><strong>STB Core</strong></a> · <a href="https://github.com/sharpbai/shared-terminal-bridge-rdc">RDC Adapter</a> · <a href="https://github.com/sharpbai/shared-terminal-bridge-docs">Documentation</a></p>
 
 让人和 AI 在**同一个真实终端会话**中协作，并把观察、授权、中断和审计变成可控的系统边界。
 
