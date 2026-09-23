@@ -1,258 +1,162 @@
 # Shared Terminal Bridge
 
-一个本地优先、以人为主的交互式终端协同项目。
+让人和 AI 在**同一个真实终端会话**中协作，并把观察、授权、中断和审计变成可控的系统边界。
 
-项目不创建新的“AI Terminal”，也不依赖飞书。用户继续在自己的 Terminal
-和 tmux pane 中工作；Codex 作为 sidecar 读取同一份终端上下文，并且只在获得
-明确授权时向同一个 pane 输入。tmux pane 是双方共享的事实来源。
+Shared Terminal Bridge（STB）是一个本地优先的交互式终端桥接层。人继续使用熟悉的 Terminal、tmux 和 SSH；Codex 或其他 MCP 客户端读取同一个 pane，并只在获得授权时向它输入。STB 不创建第二套隐藏 Shell，也不要求目标机器安装 Agent wrapper。
 
 ![Shared Terminal Bridge：Codex 清理磁盘演示](assets/readme-demo/stb-disk-cleanup-demo.gif)
 
-演示展示了 STB 的核心协作链路：Codex 先以只读方式观察磁盘占用，形成
-Task Block 并展示完整清理命令；人工批准后，Bridge 授予当前 generation 的
-Execution Lease，命令在同一个 tmux pane 中可见执行。长任务由本地事件驱动等待，
-完成后只向模型返回有界结果与证据；Human 随时可以通过 `Ctrl+C` 撤销当前租约。
+上面的演示以“检查并清理磁盘”为例：AI 先只读观察，给出完整命令；人批准后，命令在共享 pane 中可见执行。长任务由 Bridge 在本地等待并在状态变化时唤醒模型；人随时可以按 `Ctrl+C` 中断命令并撤销当前执行授权。
 
-## 当前目标
+## 为什么要做 STB
 
-建立一层很薄的 Terminal Bridge，逐步提供：
+Codex 和 ChatGPT 已经很适合用会话组织开发、研究、方案设计和项目管理。但交互式运维与 IT 支持还有一组不同的问题：
 
-1. 发现并标识 tmux session、window 和 pane。
-2. 通过 `capture-pane` 读取用户正在使用的终端上下文。
-3. 通过 `send-keys` 进行经过授权的 Agent 输入。
-4. 在 tmux 客户端输入层识别真人 `Ctrl+C`。
-5. 真人中止后，立即撤销对应 pane 的 Agent execution lease。
+- 操作发生在 SSH、Shell、PowerShell 或交互式程序里，状态持续存在，不能靠每轮复制粘贴重建。
+- 人和 AI 需要看到同一份屏幕历史，而不是各自维护一个容易分叉的终端。
+- AI 必须能执行命令，但“可以写入”不能等于“此后一直有权写入”。
+- 人按下 `Ctrl+C` 通常表示接管或改变意图，不能被模型理解为普通失败后自动重试。
+- 已经做出的模型决策可能在等待后过期，旧操作不能越过人的中断继续落到终端。
+- 长任务不应靠模型频繁轮询；完整 scrollback、重复状态和 TUI 画面也不应持续消耗上下文。
+- 远程能力需要可扩展：今天是本机 tmux 和 SSH，未来可以是远程 PowerShell 或其他操作通道。
 
-## 核心交互模型
+STB 的目标，是在“有上下文的 Agent 环境”和“真实操作界面”之间提供一层薄而明确的控制面。
+
+## 它解决什么问题
+
+| 痛点 | STB 的处理方式 |
+| --- | --- |
+| 人和 AI 使用不同 Shell，状态不一致 | tmux pane 是双方共享的事实来源 |
+| 只想查看历史，却被迫申请写权限 | Observation 与 Action 分离，只读无需 lease |
+| 人中断后 AI 仍继续旧计划 | `Ctrl+C` 触发 Human Override，立即撤销当前 generation |
+| 旧请求或并发任务晚到 | 每次写入都校验 pane、lease 和 generation |
+| 长任务靠模型反复询问 | Bridge 本地维护 job/wait，变化时返回有界增量 |
+| 终端噪声挤占模型上下文 | Read Delta、AI Context Policy 和 Task Block 控制输入预算 |
+| 命令在隐藏脚本中执行 | 命令直接、可见地进入共享 pane，不注入临时脚本 |
+| 管理接口绕过终端安全边界 | STB-RDC 模式将目标主机操作收敛到同一 capability plane |
+
+## 工作方式
+
+```mermaid
+flowchart LR
+    H[Human] -->|键盘 / 鼠标| T[tmux client]
+    T --> P[共享 session / pane]
+    A[Codex / ChatGPT] -->|MCP| B[Shared Terminal Bridge]
+    B -->|有界读取| P
+    B -->|有效 lease + generation| P
+    T -->|Human Ctrl+C| B
+    B -->|撤销旧 generation| L[Execution Lease]
+```
+
+三个通道彼此独立：
+
+1. **观察通道**：通过 `capture-pane` 和 cursor delta 读取受 ACL 约束的上下文，不要求写入租约。
+2. **Agent 输入通道**：通过 Bridge 将可见命令送入 pane；每次操作都校验 execution lease。
+3. **Human 控制通道**：tmux client 的真实 `Ctrl+C` 产生 Human Override；Agent 注入的 `C-c` 不会被误判成人工输入。
+
+关键语义是：
 
 ```text
-                    Human
-                      │
-                tmux client input
-                      │
-                      ▼
-Terminal UI ──→ tmux session / pane ←── Terminal Bridge ←── Codex
-                      │                         │
-                      │ capture-pane            │ send-keys
-                      └──── shared context ─────┘
+Human Ctrl+C ≠ command failed
+Human Ctrl+C ≠ automatic retry
+Human Ctrl+C = revoke the current Agent execution authority
 ```
 
-数据通道与控制通道分开：
+更完整的组件、状态和信任边界见[架构说明](docs/architecture.md)。
 
-- 数据通道：`tmux capture-pane`，向 Codex 提供 scrollback/context。
-- Agent 输入通道：`tmux send-keys`，只在明确授权和有效 lease 下使用。
-- Human 控制通道：tmux client key binding，产生 `HUMAN_INTERRUPT` 等事件。
+## 快速开始
 
-## 已验证
+### 1. 准备环境
 
-2026-09-20 已验证 tmux 能区分真人和 Agent 的 `Ctrl+C`：
-
-- 真人按键经过 tmux client key table，正常送入 pane，并记录
-  `HUMAN_INTERRUPT`。
-- `tmux send-keys C-c` 直接注入 pane，不触发该事件。
-- 事件中可同时得到 `pane_id` 和 `client_name`。
-
-详见 [Human/Agent 来源分流验证](docs/validation-human-agent-source.md)。
-
-Unix socket 结构化事件、Agent 不误报和 fail-open 验证也已通过，详见
-[Unix Socket Human Event 验证](docs/validation-unix-socket-events.md)。
-
-Execution Lease 的 `ACTIVE → REVOKED` 和 stale generation 拒绝也已通过，
-详见 [Execution Lease 与 Human Override 验证](docs/validation-execution-lease.md)。
-
-只读 pane 枚举、history/state 读取和未授权 pane 隔离已通过，详见
-[Observation Bridge 验证](docs/validation-observation-bridge.md)。
-
-多 client 的 active pane 精确解析和未知 client fail-closed 已通过，详见
-[Per-client Active Pane 验证](docs/validation-active-pane.md)。
-
-四个模块已合并进保持状态的本地 daemon，并通过端到端检查：
-[本地 Bridge 原型](docs/local-bridge-prototype.md)、
-[合并验证记录](docs/validation-combined-bridge.md)。
-
-tmux root `C-c` 的原配置备份、精确恢复和无快照 fail-closed 已通过：
-[Binding 生命周期验证](docs/validation-binding-lifecycle.md)。
-
-daemon SIGKILL 后 lease、generation 和 binding 快照的 fail-closed 持久恢复
-
-tmux/STB 交互历史以 0600 JSONL 持久保存在
-`~/.local/state/shared-terminal-bridge/history.jsonl`，可用 `stb history <会话>` 查询。
-已通过：[异常退出恢复验证](docs/validation-crash-recovery.md)。
-
-daemon 单实例锁、tmux server UUID 校验和 pane ID 复用隔离已通过：
-[单实例与 Server Identity 验证](docs/validation-instance-identity.md)。
-
-最小 stdio MCP 封装已完成：默认只读，Action 需显式启用且不暴露 lease
-获取能力。Leased MCP 写入、Agent interrupt、Human Override 和 stale 拒绝的
-端到端验证已通过。详见 [最小 MCP Server](docs/mcp-server.md)。
-
-MCP 创建托管 tmux session 与本地一键进入/管理已实现：
-[托管 tmux Session 与 stb 快捷命令](docs/managed-sessions.md)。
-
-确定性的 AI Context Policy 与纯本地 Task Block 已实现：模型优先读取 cursor
-增量，Bridge 在内容进入上下文前清理终端噪声、折叠重复并强制字节/行预算。
-`terminal_task_block` 继续只维护计划和观察元数据；API v8 新增保守的
-`terminal_task_block_execute`，可在本地连续调度 1–8 条白名单只读命令，每条命令
-仍保持可见、独立 job、逐步 lease 校验和审计。详见
-[AI Context Policy v0.2](docs/ai-context-policy.md)。
-
-API v9 新增不读写终端的 `terminal_program_profile`，全屏程序先寻找
-CLI/CMD/batch 接口；首批覆盖 TestDisk/PhotoRec。非交互接口不足时，
-默认由人连续操作 TUI 到明确检查点，模型再观察一次。
-
-完整的实施阶段、接口分层、Pane ACL、Execution Lease、审计、AI Context Policy
-和 Command Block 演进见 [后续路线图](docs/roadmap.md)。
-
-## 运行当前 PoC
+当前实现需要 Python 3、tmux，以及 macOS 或 Linux 本地 Unix socket 环境。项目本身没有第三方 Python 运行时依赖。
 
 ```bash
-cd '/Users/sharpbai/Documents/ChatGPT/IT网管/shared-terminal-bridge'
-./poc/human_event_tmux.py
+git clone https://github.com/sharpbai/shared-terminal-bridge.git
+cd shared-terminal-bridge
+./stb --help
 ```
 
-进入隔离测试 session 后执行：
+如需在任意目录调用，可把仓库的 `bin` 目录加入 `PATH`，或为 `stb` 建立符号链接。
+
+### 2. 创建并进入托管会话
 
 ```bash
-ping 1.1.1.1
+./stb create disk-check --cwd /path/to/work --enter
 ```
 
-亲自按 `Ctrl+C`，然后按 `Ctrl+B`、`D` detach。脚本会显示事件日志。
+`stb create` 在默认 socket 不存在时会自动启动 Bridge daemon。托管 session 默认启用鼠标，并为新 pane 配置 100,000 行历史。
 
-验证 Agent 注入不会被误判：
+如果会话由 MCP 创建，可以在本地一键进入：
 
 ```bash
-./poc/human_event_tmux.py --agent-ctrl-c
+./stb enter disk-check
 ```
 
-下一阶段的 Unix socket 事件 PoC：
+### 3. 日常管理
 
 ```bash
-./poc/human_event_socket.py
-./poc/human_event_socket.py agent-test
-./poc/human_event_socket.py fail-open
+./stb list                          # 列出托管会话
+./stb info disk-check               # 查看会话、pane 与配置
+./stb history disk-check --limit 50 # 查看 tmux/STB 交互历史
+./stb jobs                          # 查看受监测的终端任务
+./stb approvals                     # 查看长任务批准请求
+./stb daemon status                 # 查看本地 Bridge 状态
+./stb stop disk-check               # 停止并清理托管会话
 ```
 
-Execution Lease 撤销 PoC：
+常用安装方式、daemon 生命周期、人工授权和故障排查见[快速上手](docs/getting-started.md)。完整命令以 `stb --help` 和各子命令的 `--help` 为准。
+
+## 接入 Codex / MCP
+
+STB 的 MCP server 是 Bridge Unix socket 的 stdio 适配层。它不直接操作 tmux，因此 Pane ACL、lease、generation、Human Override 和审计仍由 Bridge 统一强制。
+
+```json
+{
+  "command": "python3",
+  "args": [
+    "/absolute/path/shared-terminal-bridge/mcp_server/server.py",
+    "--bridge-socket",
+    "/tmp/shared-terminal-bridge.sock",
+    "--enable-actions",
+    "--enable-session-management"
+  ]
+}
+```
+
+默认 MCP 只提供 Observation；只有显式启用 actions 后才注册写入工具。创建会话不等于取得执行权限，模型在首次写入前仍需为当前任务和用户回合取得新的 generation。
+
+详细工具、Codex Turn Identity、长任务批准和取消语义见[最小 MCP Server](docs/mcp-server.md)。
+
+## 安全与协作原则
+
+- **Human first**：人的输入和接管始终高于 Agent 的旧决策。
+- **Read by default**：观察与写入分离；读取历史不占用 execution lease。
+- **Visible execution**：目标命令直接显示在共享终端中，不注入隐藏脚本、marker 或环境假设。
+- **Revocable authority**：授权属于具体 pane 和 generation，可以被人工即时撤销。
+- **Fail closed for writes**：未知 pane、失效 lease、旧 generation 和越权能力在写入前被拒绝。
+- **Fail open for human control**：Bridge 或日志异常不能阻止真实 `Ctrl+C` 到达前台进程。
+- **Bounded context**：只把完成当前判断所需的增量和证据送入模型上下文。
+- **Auditable operations**：命令、租约、批准、等待与中断形成可回放的本地记录。
+
+STB 是协作与控制层，不是用户身份认证系统，也不是新的 Web Terminal。当前能力和限制见[路线图](docs/roadmap.md)。
+
+## 文档
+
+- [快速上手与日常管理](docs/getting-started.md)
+- [高层架构](docs/architecture.md)
+- [托管 tmux Session 与 `stb` 命令](docs/managed-sessions.md)
+- [MCP Server 与工具语义](docs/mcp-server.md)
+- [API v0.1](docs/api-v0.1.md)
+- [AI Context Policy](docs/ai-context-policy.md)
+- [验证与回归索引](docs/validation-index.md)
+- [演进路线图](docs/roadmap.md)
+
+## 开发与验证
+
+运行自动化测试：
 
 ```bash
-./poc/execution_lease.py
+python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
-只读 Observation Bridge PoC：
-
-```bash
-./poc/observation_bridge.py
-```
-
-多 client active pane 解析 PoC：
-
-```bash
-./poc/active_pane_clients.py
-```
-
-合并后的本地 Bridge 端到端 PoC：
-
-```bash
-./poc/combined_bridge.py
-```
-
-tmux `Ctrl+C` binding 备份/恢复 PoC：
-
-```bash
-./poc/binding_restore.py
-```
-
-daemon 异常退出与持久状态恢复 PoC：
-
-```bash
-./poc/crash_recovery.py
-```
-
-daemon 单实例与 tmux server identity PoC：
-
-```bash
-./poc/instance_identity.py
-```
-
-真实日常 tmux 的受限人工验收：
-
-```bash
-./poc/live_tmux_acceptance.py
-```
-
-该步骤会切换到临时 tmux window，需要真人按一次 `Ctrl+C`。详见
-[真实 tmux 人工验收](docs/validation-live-tmux-acceptance.md)。
-
-最小 MCP 端到端 PoC：
-
-```bash
-./poc/mcp_end_to_end.py
-```
-
-重跑 v1 回归基准：
-
-```bash
-python3 -m unittest discover -s tests -p 'test_*_baseline.py'
-```
-
-## 目录
-
-```text
-shared-terminal-bridge/
-├── README.md
-├── bridge/
-│   ├── __init__.py
-│   └── local_bridge.py
-├── mcp_server/
-│   ├── __init__.py
-│   └── server.py
-├── docs/
-│   ├── api-v0.1.md
-│   ├── ai-context-policy.md
-│   ├── architecture.md
-│   ├── local-bridge-prototype.md
-│   ├── mcp-server.md
-│   ├── roadmap.md
-│   ├── validation-active-pane.md
-│   ├── validation-binding-lifecycle.md
-│   ├── validation-combined-bridge.md
-│   ├── validation-crash-recovery.md
-│   ├── validation-execution-lease.md
-│   ├── validation-human-agent-source.md
-│   ├── validation-instance-identity.md
-│   ├── validation-live-tmux-acceptance.md
-│   ├── validation-observation-bridge.md
-│   └── validation-unix-socket-events.md
-├── poc/
-    ├── active_pane_clients.py
-    ├── binding_restore.py
-    ├── combined_bridge.py
-    ├── crash_recovery.py
-    ├── execution_lease.py
-    ├── human_event_socket.py
-    ├── instance_identity.py
-    ├── live_tmux_acceptance.py
-    ├── mcp_end_to_end.py
-    ├── observation_bridge.py
-    └── human_event_tmux.py
-└── tests/
-    ├── baselines/
-    │   └── combined_bridge_v1.json
-    ├── test_binding_restore_baseline.py
-    ├── test_combined_bridge_baseline.py
-    ├── test_crash_recovery_baseline.py
-    ├── test_instance_identity_baseline.py
-    ├── test_mcp_end_to_end_baseline.py
-    └── test_mcp_server.py
-```
-
-## 当前边界
-
-- 已实现本地 Bridge、execution lease 与最小 stdio MCP 封装。
-- 大部分自动 PoC 使用独立 tmux socket；真实日常 tmux 受限验收已通过，
-  并在退出时恢复临时 binding，不修改 `~/.tmux.conf`。
-- Unix socket、execution lease 和只读 Observation 核心链路均已验证。
-- 合并 Bridge、binding 恢复、异常退出持久状态、daemon 单实例、
-  tmux server identity 和真实 tmux 人工验收均已通过。
-- 不记录普通按键、密码、Token 或完整命令。
-- 本项目与飞书、Notion 或其他云端文档系统无关。
+涉及真实 tmux client 输入的验收需要人工按键，入口和历史验证记录统一收录在[验证与回归索引](docs/validation-index.md)。
