@@ -25,6 +25,14 @@ Codex Desktop 可能使用 `ToolSearchAlwaysDeferMcpTools`：MCP 已成功初始
 
 ## 边界
 
+### STB-RDC Exclusive Mode
+
+当用户明确选择 STB-RDC 时，RDC 只作为 transport/bootstrap；目标主机能力必须经过 STB。RDC 独立 filesystem/search/process/shell/edit 等能力属于 bypass，默认禁止。STB 能力不足时必须 fail-closed，并取得人工对具体 capability + operation 的一次性批准后才能旁路。详见 [STB-RDC Exclusive Mode](stb-rdc-exclusive-mode.md)。
+
+v0.15.0 在现代 `server/discover` 和旧版 `initialize` 两条协议路径中发布同一 contract。
+STB 自身的 pane/lease/generation 边界由本地 Bridge 强制；RDC 独立工具的物理隐藏仍
+需要宿主 capability filtering，当前 instructions/routing policy 不应被描述成硬隔离。
+
 `mcp_server/server.py` 是 Local Bridge 的 stdio MCP 适配层。它不直接调用
 tmux，而是把 MCP tool 请求转发给 Bridge 的 Unix control socket。Pane ACL、
 execution lease、generation 和 Human Override 仍由 Bridge 强制。

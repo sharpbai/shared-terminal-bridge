@@ -1,14 +1,19 @@
 # Shared Terminal Bridge 后续路线图
 
+> 最后更新：2026-09-24 · 当前稳定基线：STB v0.15.0 / Bridge API v9
+
 ## 摘要
 
 本路线图来自 Notion 文档《人与 Codex 共用终端的交互式运维架构260920》，并结合
-2026-09-20 已完成的本地 tmux Human/Agent 来源分流实验进行修订。
+2026-09-20 至 2026-09-24 的本地 tmux、Codex MCP、真实运维基线和 ChatGPT
+STB-RDC 验证持续修订。
 
 原文将“在 iTerm2 + tmux -CC 中寻找 Human Ctrl+C 捕获点”列为第一优先级。本地
 实验已经证明 iTerm2 不是合适边界，并验证 tmux client key table 能区分 Human
-输入和 Agent 的 `send-keys` 注入。因此路线起点已经从“寻找捕获点”推进到
-“把已验证事件接入本地 Bridge”。
+输入和 Agent 的 `send-keys` 注入。项目此后已完成本地 Bridge、MCP、Execution
+Lease、AI Context Policy、TaskBlockRunner、Job/Wait、持久审计与程序能力选路，
+并通过 STB-RDC 将同一安全内核接入 ChatGPT。当前重点已从“能否安全写入终端”转为
+“跨客户端能力是否都经过同一个本地强制面，以及如何进一步减少模型编排成本”。
 
 ## 背景与范围
 
@@ -33,13 +38,14 @@
 | 阶段 | 主题 | 状态 | 主要产物 |
 |---|---|---|---|
 | Phase 0 | Human/Agent 来源分流 | 已完成 | tmux `Ctrl+C` PoC 与验证报告 |
-| Phase 1 | Observation Bridge | 核心 PoC 已通过 | pane 枚举、读取、状态接口 |
-| Phase 2 | Human Event IPC | 核心 PoC 已通过 | Unix socket、事件 schema、事件消费者 |
-| Phase 3 | Execution Control | 核心 PoC 已通过 | Pane ACL、Execution Lease、Human Override |
-| Phase 4 | 受控写入 | 待实施 | type/key/interrupt、Read Guard、审计 |
-| Phase 5 | AI Context Policy | 后排 | 上下文选择、压缩、相关历史检索 |
-| Phase 6 | Command Block Model | 后排 | 命令边界、退出码、结构化事件 |
-| Phase 7 | UI 选择 | 可选 | 仅在现有窗口体验不足时评估 |
+| Phase 1 | Observation Bridge | 已完成稳定基线 | pane 枚举、cursor delta、状态、managed session |
+| Phase 2 | Human Event IPC | 已完成稳定基线 | Unix socket、事件 schema、binding 恢复与 fail-open |
+| Phase 3 | Execution Control | 已完成稳定基线 | Pane ACL、Execution Lease、可信 turn、Human Override |
+| Phase 4 | 受控写入与审计 | 已完成稳定基线 | type/submit/key/interrupt、Lease Guard、0600 JSONL 审计 |
+| Phase 5 | AI Context Policy | v0.2 已落地 | cursor delta、预算、噪声清理、空增量停止、Job/Wait |
+| Phase 6 | Task Block / Event Model | 部分完成 | 本地计划元数据、只读 Runner、Job、批准与结构化结果 |
+| Phase 7 | TUI 与交互界面 | 轻量策略已确定 | CLI/CMD 优先、人类协同检查点、受限 fallback |
+| Phase 8 | 跨客户端与远程能力面 | 进行中 | Codex MCP、ChatGPT STB-RDC、Exclusive Mode |
 
 ## Phase 0：Human/Agent 来源分流
 
@@ -462,16 +468,136 @@ input 基本持平，耗时由 28.5 秒升至 42.8 秒，说明后续优化重�
 wait 以及 Skill 的每回合重复加载。详见
 [查看 local-33 磁盘占用 15 实操基线](baseline-live-ops-15.md)。
 
+## 2026-09-22：从 Codex 本地 MCP 扩展到 ChatGPT STB-RDC
+
+Codex MCP 已证明单机本地协作成立，但它不能单独满足“从任意环境触发实体机器、
+在不同 AI 客户端共享同一操作现场”的需求。项目因此增加独立的
+[STB-RDC Adapter](https://github.com/sharpbai/shared-terminal-bridge-rdc)：Remote Desktop
+Commander 负责发现设备和建立 transport，目标机器上的事实与控制仍由 STB 和
+managed tmux 保存。
+
+### 已完成
+
+- `stb-rdc status/bootstrap/context/lease/send/job/wait/interrupt` 薄适配器。
+- `bootstrap` 一次返回 Adapter/Bridge 版本、managed session、pane、状态、有界
+  scrollback 与 Interaction Policy，并明确 `discovery_only=true`、
+  `task_executed=false`。
+- 固定正式执行路径：`ChatGPT → RDC → stb-rdc → STB → tmux`。
+- ChatGPT 侧复用 STB 的 Pane ACL、Execution Lease、generation、Job/Wait、
+  Human Override 和审计，不在 Adapter 内复制安全状态机。
+- 正常命令、prompt return、blocking wait、真人 `Ctrl+C`、lease revoke 和 stale
+  generation 拒绝均通过真实端到端验证。
+- 撤销不可靠的“bootstrap 后必须额外结束一个 ChatGPT turn”设计；连接发现与实际
+  执行仍保持语义分离，但不依赖客户端无法稳定保证的自动续轮。
+
+### 形成的新边界
+
+RDC 不能因为承担 transport 就自然获得目标主机执行权。STB-RDC 任务中的终端操作
+仍必须进入共享 pane；一次 RDC 调用超时只结束观察窗口，不能篡改 STB Job 状态，
+也不能自动中断仍在运行的目标命令。
+
+## 2026-09-23：v0.14.0 固化、公开文档与项目拆分
+
+9 月 23 日没有继续扩大 Bridge API，而是把 20–22 日的实现收敛为可复用、可解释、
+可公开验证的项目基线：
+
+- STB v0.14.0 / API v9 作为当前稳定版本发布。
+- README 改为面向首次访问者的项目首页，加入磁盘清理演示、背景、痛点、架构、
+  快速上手和安全原则。
+- PoC、日常管理和验证矩阵从 README 拆分到独立文档。
+- STB、STB-RDC 与
+  [系列文档仓库](https://github.com/sharpbai/shared-terminal-bridge-docs) 分离维护，
+  三者建立互相导航并公开。
+- 十篇系列文章整理了安全模型、Context Policy、长任务、TUI 成本、STB-RDC 和
+  十五轮真实运维迭代，使实操基线成为后续回归规格的一部分。
+
+这一步的意义不是增加新功能，而是固定当前架构不变量，避免后续优化重新引入隐藏
+Shell、目标环境脚本注入、Token 轮询或跨能力面绕行。
+
+## 2026-09-24：v0.15.0 与 Exclusive Mode
+
+“分析 virga 编译失败01”的实操暴露了新的系统边界：即使终端写入已经受 STB
+控制，同一个 RDC 连接仍可能向模型暴露独立的 filesystem、search、process、shell
+和 edit 能力。如果这些能力被直接调用，模型可以从目标主机侧绕开 STB 的 lease、
+generation、Human Override 与审计。
+
+因此 v0.15.0 引入 **STB-RDC Exclusive Mode**：
+
+- 用户明确选择 STB-RDC 后，STB 是唯一 target-host capability plane。
+- RDC 默认只允许 transport/bootstrap，不自动降级到独立目标主机工具。
+- STB 缺少能力时必须 fail closed，并向人工说明缺失 capability、精确 operation、
+  target、原因和数据影响。
+- 人工旁路批准是 one-shot、capability-scoped；执行后立即失效。
+- 旁路永远不能覆盖 Human Override、已撤销 lease、stale generation、Pane ACL 或
+  long-run approval。
+
+v0.15.0 已发布 MCP contract、routing policy、版本更新、文档和回归测试。模型指令
+可以让当前客户端 fail closed，但它不是完整物理隔离；
+真正隐藏或拒绝同一 RDC 连接中的独立能力，需要 RDC/宿主提供 capability filtering
+或 policy hook。详见 [STB-RDC Exclusive Mode](stb-rdc-exclusive-mode.md)。
+
+## 2026-09-24 之后的路线优先级
+
+### 已完成：发布 v0.15.0
+
+1. 已合并 Exclusive Mode contract、文档与自动化回归。
+2. modern discovery 与 legacy initialize 均发布同一 fail-closed contract。
+3. 发布说明明确区分“模型/Adapter contract”和“宿主硬隔离”。
+
+### P0：宿主级 capability filtering
+
+1. 让 RDC/宿主根据当前任务的 STB-RDC context 隐藏或拒绝非 transport 工具。
+2. 定义一次性 bypass token：绑定 capability、operation、target、影响范围、批准人和
+   失效时间。
+3. 旁路动作进入统一审计，并在完成、失败或取消后恢复 Exclusive Mode。
+
+### P1：远程生命周期与恢复回归
+
+1. 实测 SSH Broken pipe、RDC transport 断线、MCP cancellation、daemon restart 和
+   tmux server restart 的组合场景。
+2. 等待取消只取消观察；命令终止必须是独立、显式、带 generation 的动作。
+3. 对状态未知的写操作禁止自动重放，使用稳定 job/action identity 返回已有结果或
+   要求人工确认。
+
+### P1：模型编排与性能基准
+
+1. 将性能回归固定为“冷启动首检、长扫描、写入+验证、TUI fallback、远程
+   STB-RDC”五类，不再用一个总 Token 数掩盖不同成本。
+2. `output_complete=true` 后禁止多余 status；长任务默认使用一次本地长等待，减少
+   60 秒观察窗口造成的额外模型采样。
+3. 减少重复 Skill/tool schema 冷启动；稳定事实进入 task digest，不重复携带完整
+   scrollback。
+4. 用历史 Job 的同主机、同文件系统、同命令类别耗时改善预计，但不取消 high I/O
+   与 full scan 的人工批准。
+
+### P1：Task Block 的下一阶段
+
+1. 保持 `terminal_task_block`“只记录、不执行”，继续作为目标、证据、风险、预算和
+   observation cursor 的本地容器。
+2. 完成写入后验证 block：批准只绑定单个写 step，验证使用独立只读步骤。
+3. 增加稳定 `task_block_id + step_id + generation`，使已完成步骤可复用结果、运行中
+   步骤返回同一 Job、状态未知的副作用不自动重试。
+4. 循环、重复错误与空增量由 Bridge 确定性检测，只在真正需要语义判断时唤醒模型。
+
+### P2：轻量 TUI 与跨平台扩展
+
+1. 继续执行 `CLI/CMD/batch → 人类协同检查点 → Agent 受限 fallback` 顺序。
+2. 只有前两条路径确实不足时，才加入 expected process、screen fingerprint、
+   changed-row snapshot 和有限 key sequence。
+3. 不建设通用 TUI 视觉 Agent、控件识别或终端仿真。
+4. 在 Unix/tmux 模型稳定后，评估 PowerShell/Windows 远程入口；复用 Observation、
+   Lease、generation、Human Override、Job 和 Audit 语义，而不是直接复制 tmux 实现。
+
 ## 风险与开放问题
 
 - tmux 不同 key table 是否需要统一绑定策略。
-- 多 client 同时操作一个 pane 时如何定义 active/selected pane。
 - 事件产生与 pane 接收 `C-c` 的严格先后顺序。
 - socket consumer 断线期间的事件保留与重放边界。
 - 远程 SSH、nested tmux 和本地 tmux 的 pane/host 映射。
 - vim、less、top 等全屏程序下如何判定 terminal state。
 - shell integration 是否足以提供 command/exit/host/cwd，还是需要独立 shell hook。
-- Agent 写入命令的审计内容如何兼顾可追溯性与凭证保护。
+- 宿主何时能提供 STB-RDC capability filtering 和一次性旁路 token。
+- PowerShell/Windows 如何提供与 tmux client key table 等价的可信 Human Override。
 
 ## 来源
 
@@ -480,3 +606,8 @@ wait 以及 Skill 的每回合重复加载。详见
   （读取于 2026-09-20，页面状态 Doing）。
 - 本地实测：
   [Human/Agent 来源分流验证](validation-human-agent-source.md)。
+- STB-RDC：
+  [Adapter 仓库](https://github.com/sharpbai/shared-terminal-bridge-rdc)与
+  [v0.1 端到端验收](https://github.com/sharpbai/shared-terminal-bridge-rdc/blob/main/VALIDATION-v0.1.md)。
+- 项目演进与当前架构：
+  [Shared Terminal Bridge 系列文档](https://github.com/sharpbai/shared-terminal-bridge-docs)。

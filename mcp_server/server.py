@@ -15,7 +15,7 @@ import uuid
 
 SERVER_INFO = {
     "name": "shared-terminal-bridge",
-    "version": "0.14.0",
+    "version": "0.15.0",
     "description": "Local, human-first tmux observation and leased actions",
 }
 MODERN_VERSION = "2026-07-28"
@@ -902,6 +902,10 @@ class MinimalMCPServer:
             "supportedVersions": SUPPORTED_VERSIONS,
             "capabilities": {"tools": {"listChanged": False}},
             "instructions": (
+                "STB-RDC exclusive-mode contract: when the user selected STB-RDC, "
+                "treat any companion Remote Desktop Commander as transport/bootstrap only. "
+                "Independent RDC target-host capabilities require explicit one-shot bypass "
+                "approval and must never bypass Human Override, lease, ACL, or long-run controls. "
                 "For an exact managed session name, use the name-based tools "
                 "directly; do not list sessions first. Observation tools "
                 "are pane-ACL constrained and never require an execution lease. "
@@ -974,6 +978,8 @@ class MinimalMCPServer:
             "capabilities": {"tools": {"listChanged": False}},
             "serverInfo": SERVER_INFO,
             "instructions": (
+                "When STB-RDC is selected, RDC is transport/bootstrap only; independent "
+                "RDC target-host capabilities require explicit one-shot human bypass approval. "
                 "Use exact managed session names directly; list only when the "
                 "name is missing or ambiguous. Observation does not require a "
                 "lease. Before the first actual write call "

@@ -10,6 +10,15 @@ Shared Terminal Bridge（STB）是一个本地优先的交互式终端桥接层�
 
 上面的演示以“检查并清理磁盘”为例：AI 先只读观察，给出完整命令；人批准后，命令在共享 pane 中可见执行。长任务由 Bridge 在本地等待并在状态变化时唤醒模型；人随时可以按 `Ctrl+C` 中断命令并撤销当前执行授权。
 
+## 当前版本
+
+当前稳定版本为 **v0.15.0 / Bridge API v9**。本版增加 STB-RDC Exclusive Mode
+contract：用户明确选择 STB-RDC 后，RDC 只承担 transport/bootstrap，目标主机操作
+默认必须经过 STB；独立 RDC capability 需要一次性人工旁路批准。该 contract 让当前
+客户端 fail closed，但完整的宿主级物理隔离仍需 RDC/宿主支持 capability filtering。
+详见 [STB-RDC Exclusive Mode](docs/stb-rdc-exclusive-mode.md)和
+[版本记录](CHANGELOG.md)。
+
 ## 为什么要做 STB
 
 Codex 和 ChatGPT 已经很适合用会话组织开发、研究、方案设计和项目管理。但交互式运维与 IT 支持还有一组不同的问题：
@@ -150,8 +159,10 @@ STB 是协作与控制层，不是用户身份认证系统，也不是新的 Web
 - [MCP Server 与工具语义](docs/mcp-server.md)
 - [API v0.1](docs/api-v0.1.md)
 - [AI Context Policy](docs/ai-context-policy.md)
+- [STB-RDC Exclusive Mode](docs/stb-rdc-exclusive-mode.md)
 - [验证与回归索引](docs/validation-index.md)
 - [演进路线图](docs/roadmap.md)
+- [版本记录](CHANGELOG.md)
 
 ## 开发与验证
 

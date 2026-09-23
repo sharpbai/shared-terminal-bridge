@@ -32,6 +32,7 @@ python3 -m unittest discover -s tests -p 'test_*_baseline.py'
 | 真实 tmux 日常验收 | 观察、隔离、Agent/Human 中断和 stale action 检查通过 | [Live Acceptance](validation-live-tmux-acceptance.md) |
 | Task Block Runner | 白名单只读多步骤、逐步 lease 校验和停止条件通过 | [Task Block Runner](validation-task-block-runner.md) |
 | 程序能力选择 | CLI/CMD/batch 优先与轻量 TUI fallback 策略通过 | [Program Capability](validation-program-capability-v9.md) |
+| STB-RDC Exclusive Mode contract | modern/legacy MCP 均发布 fail-closed 与 one-shot bypass 说明 | [Exclusive Mode](stb-rdc-exclusive-mode.md) |
 
 操作实测基线另见：
 
