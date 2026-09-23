@@ -6,6 +6,13 @@
 和 tmux pane 中工作；Codex 作为 sidecar 读取同一份终端上下文，并且只在获得
 明确授权时向同一个 pane 输入。tmux pane 是双方共享的事实来源。
 
+![Shared Terminal Bridge：Codex 清理磁盘演示](assets/readme-demo/stb-disk-cleanup-demo.gif)
+
+演示展示了 STB 的核心协作链路：Codex 先以只读方式观察磁盘占用，形成
+Task Block 并展示完整清理命令；人工批准后，Bridge 授予当前 generation 的
+Execution Lease，命令在同一个 tmux pane 中可见执行。长任务由本地事件驱动等待，
+完成后只向模型返回有界结果与证据；Human 随时可以通过 `Ctrl+C` 撤销当前租约。
+
 ## 当前目标
 
 建立一层很薄的 Terminal Bridge，逐步提供：

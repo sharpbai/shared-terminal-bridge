@@ -2,3 +2,4 @@ __pycache__/
 *.py[cod]
 *.sock
 *.log
+assets/readme-demo/frames/
