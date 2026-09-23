@@ -16,6 +16,7 @@ SESSION = "binding-restore-poc"
 CONTROL_SOCKET = pathlib.Path("/tmp/binding-restore-control.sock")
 EVENT_SOCKET = pathlib.Path("/tmp/binding-restore-events.sock")
 STATE_FILE = pathlib.Path("/tmp/binding-restore-state.json")
+HISTORY_FILE = pathlib.Path("/tmp/binding-restore-history.jsonl")
 
 
 def tmux(*arguments: str, capture: bool = False, check: bool = True):
@@ -84,7 +85,7 @@ def main() -> int:
     )
     original = binding()
 
-    for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE):
+    for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE, HISTORY_FILE):
         if path.exists():
             path.unlink()
     server = subprocess.Popen(
@@ -102,6 +103,8 @@ def main() -> int:
             pane,
             "--state-file",
             str(STATE_FILE),
+            "--history-file",
+            str(HISTORY_FILE),
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -194,7 +197,7 @@ def main() -> int:
             server.kill()
             server.wait(timeout=2)
         tmux("kill-server", check=False)
-        for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE):
+        for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE, HISTORY_FILE):
             if path.exists():
                 path.unlink()
 

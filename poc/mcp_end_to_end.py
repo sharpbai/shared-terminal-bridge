@@ -17,6 +17,7 @@ SESSION = "mcp-bridge-poc"
 CONTROL_SOCKET = pathlib.Path("/tmp/mcp-bridge-control.sock")
 EVENT_SOCKET = pathlib.Path("/tmp/mcp-bridge-events.sock")
 STATE_FILE = pathlib.Path("/tmp/mcp-bridge-state.json")
+HISTORY_FILE = pathlib.Path("/tmp/mcp-bridge-history.jsonl")
 MARKER = "MCP_BRIDGE_OBSERVATION_MARKER"
 WRITE_MARKER = "MCP_BRIDGE_LEASED_WRITE_ALLOWED"
 STALE_MARKER = "MCP_BRIDGE_STALE_WRITE_MUST_NOT_APPEAR"
@@ -125,6 +126,7 @@ def main():
         CONTROL_SOCKET,
         EVENT_SOCKET,
         STATE_FILE,
+        HISTORY_FILE,
         pathlib.Path(f"{STATE_FILE}.lock"),
     ):
         if path.exists():
@@ -157,6 +159,8 @@ def main():
             pane,
             "--state-file",
             str(STATE_FILE),
+            "--history-file",
+            str(HISTORY_FILE),
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -383,6 +387,7 @@ def main():
             == [
                 "terminal_list",
                 "get_active_pane",
+                "terminal_history",
                 "terminal_read",
                 "terminal_read_delta",
                 "terminal_state",
@@ -493,6 +498,7 @@ def main():
             CONTROL_SOCKET,
             EVENT_SOCKET,
             STATE_FILE,
+            HISTORY_FILE,
             pathlib.Path(f"{STATE_FILE}.lock"),
         ):
             if path.exists():

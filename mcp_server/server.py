@@ -15,7 +15,7 @@ import uuid
 
 SERVER_INFO = {
     "name": "shared-terminal-bridge",
-    "version": "0.10.0",
+    "version": "0.14.0",
     "description": "Local, human-first tmux observation and leased actions",
 }
 MODERN_VERSION = "2026-07-28"
@@ -45,6 +45,15 @@ REQUIRES_BRIDGE_V5 = {
 }
 REQUIRES_BRIDGE_V6 = {
     "terminal_wait_job",
+}
+REQUIRES_BRIDGE_V7 = {
+    "terminal_history",
+}
+REQUIRES_BRIDGE_V8 = {
+    "terminal_task_block_execute",
+}
+REQUIRES_BRIDGE_V9 = {
+    "terminal_program_profile",
 }
 
 
@@ -256,6 +265,24 @@ OBSERVATION_TOOLS = [
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
     {
+        "name": "terminal_history",
+        "title": "Read persistent tmux/STB interaction history",
+        "description": (
+            "Read the local 0600 JSONL audit history for managed tmux/STB "
+            "interactions. Filter by session, pane, or action. Password input "
+            "content is never recorded."
+        ),
+        "inputSchema": object_schema(
+            {
+                "session": {"type": "string", "minLength": 1},
+                "pane": PANE,
+                "action": {"type": "string", "minLength": 1},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+            }
+        ),
+        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+    },
+    {
         "name": "terminal_read",
         "title": "Read bounded pane history",
         "description": (
@@ -354,7 +381,7 @@ ACTION_TOOLS = [
                 "idle_budget_ms": {"type": "integer", "minimum": 1, "maximum": 600000},
                 "total_budget_ms": {"type": "integer", "minimum": 1, "maximum": 600000},
             },
-            ["pane", "generation", "text", "expected_duration_ms", "resource_class", "idle_budget_ms", "total_budget_ms"],
+            ["pane", "generation", "text", "expected_duration_ms", "resource_class"],
         ),
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     },
@@ -418,6 +445,80 @@ ACTION_TOOLS = [
                 "max_lines": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 200},
             },
             ["block_id"],
+        ),
+        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "terminal_task_block_execute",
+        "title": "Execute a bounded read-only terminal task block",
+        "description": (
+            "Execute 1-8 conservative read-only commands sequentially in the "
+            "local Bridge. Each command remains visible, creates its own job, "
+            "and is checked against the same pane lease and Human Ctrl+C "
+            "override before it is sent. The Runner rejects shell control "
+            "operators, redirection, expansion, unknown executables, and "
+            "mutating subcommands. Use only when the next step does not need "
+            "semantic model judgment. The existing terminal_task_block remains "
+            "non-executing planning metadata."
+        ),
+        "inputSchema": object_schema(
+            {
+                "pane": PANE,
+                "generation": GENERATION,
+                "steps": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "items": object_schema(
+                        {
+                            "step_id": {"type": "string", "minLength": 1},
+                            "text": {"type": "string", "minLength": 1},
+                            "expected_duration_ms": {
+                                "type": "integer", "minimum": 1, "maximum": 120000,
+                            },
+                            "assert": {
+                                "type": "object",
+                                "minProperties": 1,
+                                "maxProperties": 1,
+                                "properties": {
+                                    "contains": {"type": "string"},
+                                    "not_contains": {"type": "string"},
+                                    "regex": {"type": "string"},
+                                },
+                                "additionalProperties": False,
+                            },
+                        },
+                        ["text"],
+                    ),
+                },
+                "max_duration_ms": {
+                    "type": "integer", "minimum": 1, "maximum": 120000,
+                    "default": 120000,
+                },
+                "stop_on_error": {"type": "boolean", "default": True},
+            },
+            ["pane", "generation", "steps"],
+        ),
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "openWorldHint": True,
+        },
+    },
+    {
+        "name": "terminal_program_profile",
+        "title": "Inspect a terminal program capability profile",
+        "description": (
+            "Return local, read-only guidance about a known terminal program's "
+            "CLI/CMD/batch interface and TUI fallback policy. Call this before "
+            "driving a known full-screen program. This does not inspect or write "
+            "the target terminal; installed-version support must still be verified "
+            "with the profile's safe probe. If TUI is required, prefer a human "
+            "checkpoint over agent key-by-key operation. Omit program to list profiles."
+        ),
+        "inputSchema": object_schema(
+            {"program": {"type": "string", "minLength": 1}},
+            [],
         ),
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
@@ -563,11 +664,16 @@ JOB_TOOLS = [
         "name": "terminal_job_status",
         "title": "Read one terminal job status",
         "description": (
-            "Read compact status and bounded output for one job. This is local "
-            "observation only and never writes to the pane."
+            "Read compact status and recent evidence for one job. Set "
+            "include_output only for an explicit diagnostic read; ordinary "
+            "status checks should keep it false. This never writes to the pane."
         ),
         "inputSchema": object_schema(
-            {"job_id": {"type": "string", "minLength": 1}}, ["job_id"]
+            {
+                "job_id": {"type": "string", "minLength": 1},
+                "include_output": {"type": "boolean", "default": False},
+            },
+            ["job_id"],
         ),
         "annotations": {"readOnlyHint": True, "openWorldHint": False},
     },
@@ -575,7 +681,8 @@ JOB_TOOLS = [
         "name": "terminal_wait_job",
         "title": "Wait locally for a terminal job event",
         "description": (
-            "Block locally for up to 10 minutes without model polling. Return "
+            "Block locally in one call for up to 10 minutes without model polling. "
+            "Use the default 600000 ms instead of repeated short waits. Return "
             "immediately on completion, Human Ctrl+C, an interactive prompt, or "
             "the human decision deadline. At 10 minutes return "
             "STRATEGY_REVIEW_REQUIRED: compare alternatives using only meaningful "
@@ -759,6 +866,9 @@ class MinimalMCPServer:
                     or (api_version < 4 and tool["name"] in REQUIRES_BRIDGE_V4)
                     or (api_version < 5 and tool["name"] in REQUIRES_BRIDGE_V5)
                     or (api_version < 6 and tool["name"] in REQUIRES_BRIDGE_V6)
+                    or (api_version < 7 and tool["name"] in REQUIRES_BRIDGE_V7)
+                    or (api_version < 8 and tool["name"] in REQUIRES_BRIDGE_V8)
+                    or (api_version < 9 and tool["name"] in REQUIRES_BRIDGE_V9)
                 )
             ]
         else:
@@ -802,7 +912,11 @@ class MinimalMCPServer:
                 "managed session, then submit every command visibly and "
                 "separately with terminal_submit. For its returned job_id, "
                 "prefer terminal_wait_job: it waits locally up to 10 minutes "
-                "without repeated model polling. On STRATEGY_REVIEW_REQUIRED "
+                "in one call without repeated short model waits. On completion "
+                "it returns bounded output for that command, so do not add a "
+                "terminal_job_status call unless explicit diagnostics are needed. Its default "
+                "600000 ms should normally be left unchanged. On "
+                "STRATEGY_REVIEW_REQUIRED "
                 "compare alternative approaches and wait again only if justified. "
                 "HUMAN_DECISION_REQUIRED never authorizes "
                 "automatic interruption. "
@@ -810,9 +924,23 @@ class MinimalMCPServer:
                 "full_scan must first call terminal_long_run_request, show its "
                 "exact command and impact, and end the turn. A later explicit "
                 "user approval can call terminal_long_run_approve with the "
-                "request ID; never require the user to retype the command. "
+                "request ID, but must acquire the new user turn's lease before "
+                "calling approve; never require the user to retype the command. "
                 "terminal_task_block is optional local "
                 "planning metadata only and never executes its command list. "
+                "For 2-8 independent, simple read-only commands whose next "
+                "steps do not require semantic judgment, prefer "
+                "terminal_task_block_execute. It is intentionally conservative "
+                "and stops on Human Ctrl+C, interaction, assertion failure, or "
+                "lease change. "
+                "Before operating a known full-screen terminal program, call "
+                "terminal_program_profile and prefer its CLI/CMD/batch interface. "
+                "If no adequate non-interactive path exists, tell the human the "
+                "target checkpoint, end the turn, and observe once after they reach it. "
+                "Agent-driven TUI keys are a last resort; avoid one-key/one-read loops. "
+                "Batch independent lightweight read-only probes into one visible "
+                "shell command line to reduce model round trips; keep mutations, "
+                "dependent steps, and verification boundaries separate. "
                 "Prefer terminal_read_delta over terminal_read and always pass "
                 "its latest cursor. Never guess "
                 "or reuse a generation from terminal history. If terminal_read "
@@ -917,6 +1045,18 @@ class MinimalMCPServer:
             or any(not isinstance(command, str) or not command for command in commands)
         ):
             raise MCPError(-32602, "commands must contain 1 to 32 non-empty strings")
+        steps = arguments.get("steps")
+        if steps is not None and (
+            not isinstance(steps, list)
+            or not 1 <= len(steps) <= 8
+            or any(
+                not isinstance(step, dict)
+                or not isinstance(step.get("text"), str)
+                or not step.get("text")
+                for step in steps
+            )
+        ):
+            raise MCPError(-32602, "steps must contain 1 to 8 objects with non-empty text")
         generation = arguments.get("generation")
         if generation is not None and generation < 1:
             raise MCPError(-32602, "generation must be positive")
@@ -930,7 +1070,7 @@ class MinimalMCPServer:
         tool = self.tool_by_name.get(name)
         if tool is None:
             if (
-                name in (REQUIRES_BRIDGE_V2 | REQUIRES_BRIDGE_V3 | REQUIRES_BRIDGE_V4)
+                name in (REQUIRES_BRIDGE_V2 | REQUIRES_BRIDGE_V3 | REQUIRES_BRIDGE_V4 | REQUIRES_BRIDGE_V5 | REQUIRES_BRIDGE_V6 | REQUIRES_BRIDGE_V7 | REQUIRES_BRIDGE_V8 | REQUIRES_BRIDGE_V9)
                 and compatibility.get("status") in ("legacy", "restart_required")
             ):
                 bridge_response = {
@@ -970,7 +1110,7 @@ class MinimalMCPServer:
             )
             bridge_response = self.bridge.call(bridge_method, arguments)
         if (
-            name in (REQUIRES_BRIDGE_V2 | REQUIRES_BRIDGE_V3 | REQUIRES_BRIDGE_V4 | REQUIRES_BRIDGE_V5 | REQUIRES_BRIDGE_V6)
+            name in (REQUIRES_BRIDGE_V2 | REQUIRES_BRIDGE_V3 | REQUIRES_BRIDGE_V4 | REQUIRES_BRIDGE_V5 | REQUIRES_BRIDGE_V6 | REQUIRES_BRIDGE_V7 | REQUIRES_BRIDGE_V8 | REQUIRES_BRIDGE_V9)
             and bridge_response.get("error", {}).get("code") == "METHOD_NOT_FOUND"
         ):
             bridge_response = {

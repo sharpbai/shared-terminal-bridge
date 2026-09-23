@@ -17,6 +17,7 @@ TMUX_SOCKET = "managed-session-poc"
 CONTROL_SOCKET = pathlib.Path("/tmp/managed-session-control.sock")
 EVENT_SOCKET = pathlib.Path("/tmp/managed-session-events.sock")
 STATE_FILE = pathlib.Path("/tmp/managed-session-state.json")
+HISTORY_FILE = pathlib.Path("/tmp/managed-session-history.jsonl")
 MANAGED_NAME = "managed-poc"
 ORDINARY_NAME = "ordinary-poc"
 
@@ -88,6 +89,7 @@ def main():
         CONTROL_SOCKET,
         EVENT_SOCKET,
         STATE_FILE,
+        HISTORY_FILE,
         pathlib.Path(f"{STATE_FILE}.lock"),
     ):
         if path.exists():
@@ -106,6 +108,8 @@ def main():
             str(EVENT_SOCKET),
             "--state-file",
             str(STATE_FILE),
+            "--history-file",
+            str(HISTORY_FILE),
             "--allow-session-management",
         ],
         stdout=subprocess.DEVNULL,
@@ -255,6 +259,7 @@ def main():
             CONTROL_SOCKET,
             EVENT_SOCKET,
             STATE_FILE,
+            HISTORY_FILE,
             pathlib.Path(f"{STATE_FILE}.lock"),
         ):
             if path.exists():

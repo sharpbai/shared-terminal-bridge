@@ -70,6 +70,30 @@ class FakeBridgeV6(FakeBridgeV5):
         return self.response
 
 
+class FakeBridgeV7(FakeBridgeV6):
+    def call(self, method, params):
+        if method == "bridge_info":
+            return {"ok": True, "result": {"api_version": 7, "version": "test"}}
+        self.calls.append((method, params))
+        return self.response
+
+
+class FakeBridgeV8(FakeBridgeV7):
+    def call(self, method, params):
+        if method == "bridge_info":
+            return {"ok": True, "result": {"api_version": 8, "version": "test"}}
+        self.calls.append((method, params))
+        return self.response
+
+
+class FakeBridgeV9(FakeBridgeV8):
+    def call(self, method, params):
+        if method == "bridge_info":
+            return {"ok": True, "result": {"api_version": 9, "version": "test"}}
+        self.calls.append((method, params))
+        return self.response
+
+
 class FakeTurnResolver:
     def __init__(self, turn=1):
         self.turn = turn
@@ -392,6 +416,57 @@ class MinimalMCPServerTest(unittest.TestCase):
             wait_tool["inputSchema"]["properties"]["wait_ms"]["maximum"],
             600_000,
         )
+        status_tool = next(
+            tool for tool in server.list_tools(True)["tools"]
+            if tool["name"] == "terminal_job_status"
+        )
+        self.assertFalse(
+            status_tool["inputSchema"]["properties"]["include_output"]["default"]
+        )
+
+    def test_v7_publishes_history_and_derives_long_run_budgets(self):
+        server = MinimalMCPServer(FakeBridgeV7(), enable_actions=True)
+        tools = server.list_tools(True)["tools"]
+        names = [tool["name"] for tool in tools]
+        self.assertIn("terminal_history", names)
+        request_tool = next(
+            tool for tool in tools if tool["name"] == "terminal_long_run_request"
+        )
+        required = request_tool["inputSchema"]["required"]
+        self.assertNotIn("idle_budget_ms", required)
+        self.assertNotIn("total_budget_ms", required)
+
+    def test_v8_publishes_read_only_task_block_runner(self):
+        server = MinimalMCPServer(FakeBridgeV8(), enable_actions=True)
+        tools = server.list_tools(True)["tools"]
+        names = [tool["name"] for tool in tools]
+        self.assertIn("terminal_task_block_execute", names)
+        runner = next(
+            tool for tool in tools if tool["name"] == "terminal_task_block_execute"
+        )
+        self.assertEqual(runner["inputSchema"]["properties"]["steps"]["maxItems"], 8)
+
+        old_server = MinimalMCPServer(FakeBridgeV7(), enable_actions=True)
+        old_names = [tool["name"] for tool in old_server.list_tools(True)["tools"]]
+        self.assertNotIn("terminal_task_block_execute", old_names)
+
+    def test_v9_publishes_program_profiles_and_v8_hides_them(self):
+        bridge = FakeBridgeV9()
+        server = MinimalMCPServer(bridge, enable_actions=True)
+        names = [tool["name"] for tool in server.list_tools(True)["tools"]]
+        self.assertIn("terminal_program_profile", names)
+
+        result = server.call_tool(
+            {"name": "terminal_program_profile", "arguments": {"program": "testdisk"}},
+            modern=True,
+            request_id=99,
+        )
+        self.assertFalse(result["isError"])
+        self.assertIn(("terminal_program_profile", {"program": "testdisk"}), bridge.calls)
+
+        old_server = MinimalMCPServer(FakeBridgeV8(), enable_actions=True)
+        old_names = [tool["name"] for tool in old_server.list_tools(True)["tools"]]
+        self.assertNotIn("terminal_program_profile", old_names)
 
     def test_v5_hides_v6_cancellable_wait_but_keeps_job_status(self):
         server = MinimalMCPServer(FakeBridgeV5(), enable_actions=True)

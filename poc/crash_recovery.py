@@ -17,6 +17,7 @@ SESSION = "crash-recovery-poc"
 CONTROL_SOCKET = pathlib.Path("/tmp/crash-recovery-control.sock")
 EVENT_SOCKET = pathlib.Path("/tmp/crash-recovery-events.sock")
 STATE_FILE = pathlib.Path("/tmp/crash-recovery-state.json")
+HISTORY_FILE = pathlib.Path("/tmp/crash-recovery-history.jsonl")
 ORIGINAL_LABEL = "CRASH_RECOVERY_ORIGINAL_BINDING"
 
 
@@ -67,6 +68,8 @@ def start_server(pane: str):
             str(EVENT_SOCKET),
             "--state-file",
             str(STATE_FILE),
+            "--history-file",
+            str(HISTORY_FILE),
             "--allow-pane",
             pane,
         ],
@@ -95,7 +98,7 @@ def stop_server(process, *, crash=False):
 
 def main() -> int:
     tmux("kill-server", check=False)
-    for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE):
+    for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE, HISTORY_FILE):
         if path.exists():
             path.unlink()
     tmux("new-session", "-d", "-s", SESSION, "-c", str(PROJECT_ROOT))
@@ -199,7 +202,7 @@ def main() -> int:
         if second is not None and second.poll() is None:
             stop_server(second)
         tmux("kill-server", check=False)
-        for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE):
+        for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE, HISTORY_FILE):
             if path.exists():
                 path.unlink()
 

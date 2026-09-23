@@ -98,6 +98,8 @@ terminal_long_run_request
 terminal_long_run_approve
 terminal_task_block
 terminal_task_observe
+terminal_task_block_execute
+terminal_program_profile
 terminal_session_acquire
 terminal_execution_status
 terminal_session_read_delta
@@ -116,6 +118,16 @@ terminal_wait_job
 `commands` 写入 pane。每条实际命令都必须另行调用 `terminal_submit`。Bridge
 不注入 shell 包装脚本、marker、临时文件、TTY 设置或环境探测。文件传输和
 标准输入管道必须作为可见、可审计的目标环境命令显式提交。
+
+API v8 的 `terminal_task_block_execute` 是独立的只读 Runner，不改变上述旧接口。
+它接受 1–8 个简单步骤，在本地逐步复用 `terminal_submit`、job 和 wait；每一步发送前
+重新校验 lease/generation，Human Ctrl+C、交互提示、断言失败或上下文变化都会停止
+后续步骤。Runner v1 禁止管道、重定向、shell 展开和未知可执行文件，并对白名单工具
+的子命令做保守限制。它不会生成脚本、临时文件或目标环境控制协议。
+
+API v9 的 `terminal_program_profile` 仅返回本地指引：可列出或读取已知
+程序的 CLI/CMD/batch 能力和 TUI fallback 策略，不要求 lease，不向 pane
+发送任何字节。
 
 已知精确会话名时，`terminal_session_acquire(name)` 由 Bridge 直接解析 pane，无需
 先 `terminal_session_list`。纯观察直接使用 `terminal_session_read_delta`、

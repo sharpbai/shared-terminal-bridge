@@ -75,6 +75,24 @@ class TurnGateTest(unittest.TestCase):
         self.assertEqual(lease["generation"], 4)
         self.assertIn("LEASE_SUPERSEDE", [action for action, _ in records])
 
+    def test_same_turn_acquire_is_idempotent(self):
+        bridge = self.bridge_with_revoked_lease()
+        bridge.leases["%5"]["state"] = "ACTIVE"
+        records = []
+        bridge.record = lambda action, **fields: records.append((action, fields))
+
+        lease = bridge.acquire_execution(
+            "%5",
+            thread_id="thread-1",
+            turn_id="turn-1",
+            turn_started_at_ms=1000,
+        )
+
+        self.assertEqual(lease["generation"], 3)
+        self.assertTrue(lease["idempotent"])
+        self.assertEqual(bridge.generations["%5"], 3)
+        self.assertIn("LEASE_REUSE", [action for action, _ in records])
+
     def test_active_lease_cannot_be_stolen_by_other_thread(self):
         bridge = self.bridge_with_revoked_lease()
         bridge.leases["%5"]["state"] = "ACTIVE"

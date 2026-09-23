@@ -67,6 +67,9 @@ tmux root `C-c` 的原配置备份、精确恢复和无快照 fail-closed 已通
 [Binding 生命周期验证](docs/validation-binding-lifecycle.md)。
 
 daemon SIGKILL 后 lease、generation 和 binding 快照的 fail-closed 持久恢复
+
+tmux/STB 交互历史以 0600 JSONL 持久保存在
+`~/.local/state/shared-terminal-bridge/history.jsonl`，可用 `stb history <会话>` 查询。
 已通过：[异常退出恢复验证](docs/validation-crash-recovery.md)。
 
 daemon 单实例锁、tmux server UUID 校验和 pane ID 复用隔离已通过：
@@ -79,10 +82,16 @@ daemon 单实例锁、tmux server UUID 校验和 pane ID 复用隔离已通过�
 MCP 创建托管 tmux session 与本地一键进入/管理已实现：
 [托管 tmux Session 与 stb 快捷命令](docs/managed-sessions.md)。
 
-确定性的 AI Context Policy 与纯本地 `terminal_task_block` 已实现：模型优先读取 cursor
-增量，Bridge 在内容进入上下文前清理终端噪声、折叠重复并强制字节/行预算；task
-block 只在 daemon 内维护任务和观察元数据，每条终端命令仍必须显式提交。详见
+确定性的 AI Context Policy 与纯本地 Task Block 已实现：模型优先读取 cursor
+增量，Bridge 在内容进入上下文前清理终端噪声、折叠重复并强制字节/行预算。
+`terminal_task_block` 继续只维护计划和观察元数据；API v8 新增保守的
+`terminal_task_block_execute`，可在本地连续调度 1–8 条白名单只读命令，每条命令
+仍保持可见、独立 job、逐步 lease 校验和审计。详见
 [AI Context Policy v0.2](docs/ai-context-policy.md)。
+
+API v9 新增不读写终端的 `terminal_program_profile`，全屏程序先寻找
+CLI/CMD/batch 接口；首批覆盖 TestDisk/PhotoRec。非交互接口不足时，
+默认由人连续操作 TUI 到明确检查点，模型再观察一次。
 
 完整的实施阶段、接口分层、Pane ACL、Execution Lease、审计、AI Context Policy
 和 Command Block 演进见 [后续路线图](docs/roadmap.md)。

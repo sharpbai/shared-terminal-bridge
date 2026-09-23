@@ -102,6 +102,9 @@ stb daemon start
 stb daemon status
 stb daemon logs
 stb daemon stop
+
+# 查询持久化的 tmux/STB 操作历史
+stb history <会话名称> --limit 100
 ```
 
 默认运行文件：

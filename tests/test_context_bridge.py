@@ -3,14 +3,16 @@
 
 import pathlib
 import sys
+import tempfile
 import threading
+import types
 import unittest
 
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from bridge.local_bridge import BridgeError, LocalBridge, unix_ms  # noqa: E402
+from bridge.local_bridge import BridgeError, LocalBridge, TmuxBackend, unix_ms  # noqa: E402
 
 
 class FakeTmux:
@@ -20,6 +22,7 @@ class FakeTmux:
         self.content = "prompt$ "
         self.typed = []
         self.keys = []
+        self.current_command = "zsh"
 
     def read(self, pane, lines):
         return self.content
@@ -30,6 +33,9 @@ class FakeTmux:
     def send_key(self, pane, key):
         self.keys.append((pane, key))
 
+    def state(self, pane):
+        return {"current_command": self.current_command}
+
 
 def bridge_fixture():
     bridge = LocalBridge.__new__(LocalBridge)
@@ -37,6 +43,7 @@ def bridge_fixture():
     bridge.allowed_panes = {"%0"}
     bridge.leases = {"%0": {"pane": "%0", "generation": 1, "state": "ACTIVE"}}
     bridge.observation_cursors = {}
+    bridge.managed_sessions = {}
     bridge.task_blocks = {}
     bridge.long_run_requests = {}
     bridge.long_run_approvals = {}
@@ -45,6 +52,7 @@ def bridge_fixture():
     bridge.cancelled_wait_ids = set()
     bridge.interrupt_sources = {}
     bridge.audit = []
+    bridge.history_file = None
     bridge.lock = threading.RLock()
     bridge.persist_state = lambda: None
     bridge._notify_job = lambda job: None
@@ -52,6 +60,51 @@ def bridge_fixture():
 
 
 class ContextBridgeTest(unittest.TestCase):
+    def test_first_managed_session_starts_server_before_global_options(self):
+        tmux = TmuxBackend("fresh-server")
+        calls = []
+
+        def run(*arguments, check=True):
+            calls.append(arguments)
+            if arguments[0] == "has-session":
+                return types.SimpleNamespace(returncode=1, stdout="", stderr="no server")
+            if arguments[0] == "display-message" and arguments[-1] == "#{pane_id}":
+                return types.SimpleNamespace(returncode=0, stdout="%0\n", stderr="")
+            if arguments[0] == "display-message" and arguments[-1] == "#{history_limit}":
+                return types.SimpleNamespace(returncode=0, stdout="100000\n", stderr="")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        tmux.run = run
+        created = tmux.create_managed_session("verify33", "/tmp")
+
+        new_session_index = next(
+            index for index, call in enumerate(calls) if call[0] == "new-session"
+        )
+        global_option_index = next(
+            index
+            for index, call in enumerate(calls)
+            if call[:3] == ("set-option", "-g", "history-limit")
+        )
+        self.assertLess(new_session_index, global_option_index)
+        self.assertEqual(created["pane"], "%0")
+        self.assertEqual(created["history_limit"], 100000)
+
+    def test_tmux_submit_orders_literal_text_and_enter_in_one_call(self):
+        tmux = TmuxBackend("test")
+        calls = []
+        tmux.run = lambda *args, **kwargs: calls.append(args)
+
+        tmux.submit("%0", "printf ok")
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            calls[0],
+            (
+                "send-keys", "-t", "%0", "-l", "printf ok",
+                ";", "send-keys", "-t", "%0", "Enter",
+            ),
+        )
+
     def test_cursor_returns_only_new_output_and_is_opaque(self):
         bridge = bridge_fixture()
         first = bridge.terminal_read_delta("%0")
@@ -223,7 +276,226 @@ class ContextBridgeTest(unittest.TestCase):
         submitted = bridge.terminal_submit("%0", 1, "sleep 30", 60_000, "normal")
         result = bridge.terminal_wait_job(submitted["job_id"], wait_ms=1)
         self.assertEqual(result["state"], "WAIT_TIMEOUT")
+        self.assertNotIn("observation", result)
         self.assertEqual(bridge.tmux.keys, [("%0", "Enter")])
+
+    def test_job_status_output_is_explicit_opt_in(self):
+        bridge = bridge_fixture()
+        submitted = bridge.terminal_submit("%0", 1, "printf ok", 60_000, "normal")
+        bridge.tmux.content = "prompt$ printf ok\nok\nprompt$ "
+
+        compact = bridge.terminal_job_status(submitted["job_id"])
+        detailed = bridge.terminal_job_status(
+            submitted["job_id"], include_output=True
+        )
+
+        self.assertNotIn("observation", compact)
+        self.assertIn("observation", detailed)
+        self.assertIn("ok", detailed["observation"]["content"])
+
+    def test_completed_wait_returns_bounded_command_output(self):
+        bridge = bridge_fixture()
+        submitted = bridge.terminal_submit("%0", 1, "df -h", 60_000, "normal")
+        bridge.tmux.content = "prompt$ df -h\nFilesystem  Used\n/dev/x  10G\nprompt$ "
+        bridge._refresh_job(submitted["job_id"])
+        bridge.jobs[submitted["job_id"]]["last_change_ms"] = unix_ms() - 2_000
+
+        result = bridge.terminal_wait_job(submitted["job_id"], wait_ms=1)
+
+        self.assertEqual(result["state"], "COMPLETED")
+        self.assertIn("Filesystem", result["output_excerpt"]["content"])
+        self.assertNotIn("observation", result)
+        self.assertTrue(result["output_complete"])
+        self.assertEqual(result["recommended_action"], "CONTINUE")
+
+    def test_stale_password_prompt_before_command_does_not_trigger_attention(self):
+        bridge = bridge_fixture()
+        bridge.tmux.content = "old command\n[sudo] password for user:\nprompt$ "
+        submitted = bridge.terminal_submit("%0", 1, "df -h", 60_000, "normal")
+        bridge.tmux.content += "df -h\nFilesystem Used\n/dev/x 10G\nprompt$ "
+        bridge._refresh_job(submitted["job_id"])
+        bridge.jobs[submitted["job_id"]]["last_change_ms"] = unix_ms() - 2_000
+
+        result = bridge.terminal_job_status(submitted["job_id"])
+
+        self.assertEqual(result["state"], "COMPLETED")
+        self.assertIsNone(result["attention_reason"])
+
+    def test_submit_rejects_definitely_incomplete_quotes_without_writing(self):
+        bridge = bridge_fixture()
+
+        with self.assertRaises(BridgeError) as raised:
+            bridge.terminal_submit("%0", 1, "printf 'unterminated", 30_000, "normal")
+
+        self.assertEqual(raised.exception.code, "COMMAND_INCOMPLETE")
+        self.assertEqual(bridge.tmux.typed, [])
+        self.assertEqual(bridge.tmux.keys, [])
+
+    def test_read_only_task_runner_executes_steps_and_assertions(self):
+        bridge = bridge_fixture()
+        submitted = []
+
+        def submit(pane, generation, text, expected_duration_ms, resource_class):
+            submitted.append(text)
+            return {"job_id": f"job-{len(submitted)}"}
+
+        outputs = {
+            "job-1": "Filesystem Used\n/dev/x 10G",
+            "job-2": "x86_64",
+        }
+        bridge.terminal_submit = submit
+        bridge.terminal_wait_job = lambda job_id, wait_ms: {
+            "state": "COMPLETED",
+            "completion_confidence": "prompt_returned",
+            "output_excerpt": {"content": outputs[job_id]},
+        }
+
+        result = bridge.terminal_task_block_execute(
+            "%0",
+            1,
+            [
+                {"text": "df -h", "assert": {"contains": "Filesystem"}},
+                {"text": "uname -m", "assert": {"regex": "x86_64"}},
+            ],
+        )
+
+        self.assertEqual(result["state"], "COMPLETED")
+        self.assertEqual(submitted, ["df -h", "uname -m"])
+        self.assertTrue(all(step["assertion"]["passed"] for step in result["steps"]))
+        self.assertTrue(all(step["output_ref"].startswith("job://") for step in result["steps"]))
+
+    def test_read_only_task_runner_rejects_shell_programs_before_writing(self):
+        bridge = bridge_fixture()
+
+        with self.assertRaises(BridgeError) as raised:
+            bridge.terminal_task_block_execute(
+                "%0", 1, [{"text": "df -h | sort -h"}]
+            )
+
+        self.assertEqual(raised.exception.code, "TASK_BLOCK_COMMAND_NOT_READ_ONLY")
+        self.assertEqual(bridge.tmux.keys, [])
+
+    def test_read_only_task_runner_rejects_mutating_variants(self):
+        bridge = bridge_fixture()
+        commands = (
+            "sed -i s/a/b/ file",
+            "qemu-img check -r all disk.qcow2",
+            "systemctl stop ssh status",
+            "journalctl --vacuum-time=1s",
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                with self.assertRaises(BridgeError) as raised:
+                    bridge.terminal_task_block_execute(
+                        "%0", 1, [{"text": command}]
+                    )
+                self.assertEqual(
+                    raised.exception.code, "TASK_BLOCK_COMMAND_NOT_READ_ONLY"
+                )
+        self.assertEqual(bridge.tmux.keys, [])
+
+    def test_recovery_diagnostics_have_exact_read_only_runner_profiles(self):
+        allowed = (
+            "fdisk -l /dev/sda",
+            "blkid -p /dev/sda1",
+            "blkid -p -O 33554432 disk.img",
+            "testdisk /version",
+            "qemu-nbd --version",
+        )
+        for command in allowed:
+            with self.subTest(command=command):
+                self.assertTrue(LocalBridge._validate_read_only_command(command))
+
+        denied = (
+            "fdisk /dev/sda",
+            "blkid /dev/sda1",
+            "blkid -p -c cache /dev/sda1",
+            "testdisk /dev/sda",
+            "qemu-nbd --connect=/dev/nbd0 disk.qcow2",
+        )
+        for command in denied:
+            with self.subTest(command=command):
+                with self.assertRaises(BridgeError) as raised:
+                    LocalBridge._validate_read_only_command(command)
+                self.assertEqual(raised.exception.code, "TASK_BLOCK_COMMAND_NOT_READ_ONLY")
+
+    def test_program_profile_is_local_guidance(self):
+        bridge = bridge_fixture()
+        listed = bridge.terminal_program_profile()
+        self.assertEqual(
+            [item["program"] for item in listed["profiles"]],
+            ["photorec", "testdisk"],
+        )
+        profile = bridge.terminal_program_profile("/usr/local/bin/testdisk")
+        self.assertEqual(profile["profile"]["preferred_interface"], "cmd")
+        self.assertEqual(profile["profile"]["tui_policy"], "human_assisted")
+        self.assertEqual(bridge.tmux.typed, [])
+        with self.assertRaises(BridgeError) as raised:
+            bridge.terminal_program_profile("unknown-tui")
+        self.assertEqual(raised.exception.code, "PROGRAM_PROFILE_NOT_FOUND")
+
+    def test_read_only_task_runner_stops_after_human_interrupt(self):
+        bridge = bridge_fixture()
+        submitted = []
+
+        def submit(pane, generation, text, expected_duration_ms, resource_class):
+            submitted.append(text)
+            return {"job_id": "job-1"}
+
+        def wait(job_id, wait_ms):
+            bridge.leases["%0"].update({"state": "REVOKED", "event_seq": 4})
+            return {
+                "state": "INTERRUPTED_BY_HUMAN",
+                "completion_confidence": "authoritative",
+                "output_excerpt": {"content": "partial"},
+            }
+
+        bridge.terminal_submit = submit
+        bridge.terminal_wait_job = wait
+        result = bridge.terminal_task_block_execute(
+            "%0", 1, [{"text": "df -h"}, {"text": "uname -m"}]
+        )
+
+        self.assertEqual(result["state"], "INTERRUPTED")
+        self.assertEqual(submitted, ["df -h"])
+
+    def test_remote_transport_disconnect_wakes_job(self):
+        bridge = bridge_fixture()
+        bridge.tmux.current_command = "ssh"
+        submitted = bridge.terminal_submit("%0", 1, "du /remote", 60_000, "normal")
+        bridge.tmux.content = "prompt$ du /remote\nclient_loop: send disconnect: Broken pipe\nlocal$ "
+        bridge.tmux.current_command = "zsh"
+
+        result = bridge.terminal_job_status(submitted["job_id"])
+
+        self.assertEqual(result["state"], "NEEDS_ATTENTION")
+        self.assertEqual(result["attention_reason"], "session_context_changed")
+
+    def test_long_run_budgets_are_derived_when_omitted(self):
+        bridge = bridge_fixture()
+        request = bridge.terminal_long_run_request(
+            "%0", 1, "du /", 300_000, "high_io"
+        )
+        self.assertEqual(request["idle_budget_ms"], 150_000)
+        self.assertEqual(request["total_budget_ms"], 600_000)
+
+    def test_persistent_history_filters_and_redacts_sensitive_commands(self):
+        bridge = bridge_fixture()
+        bridge.managed_sessions = {
+            "managed": {"name": "verify", "pane": "%0"}
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            bridge.history_file = pathlib.Path(directory) / "history.jsonl"
+            bridge.record("SUBMIT", pane="%0", command="printf ok")
+            bridge.record(
+                "SUBMIT", pane="%0",
+                command=bridge._history_command("export API_TOKEN=secret"),
+            )
+            result = bridge.terminal_history(session="verify", limit=10)
+
+            self.assertEqual(len(result["entries"]), 2)
+            self.assertEqual(result["entries"][1]["command"], "[REDACTED_SENSITIVE_COMMAND]")
+            self.assertEqual(bridge.history_file.stat().st_mode & 0o777, 0o600)
 
     def test_ten_minute_boundary_requires_strategy_review_without_fake_progress(self):
         bridge = bridge_fixture()

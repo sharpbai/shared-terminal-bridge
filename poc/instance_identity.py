@@ -14,6 +14,7 @@ BRIDGE = ROOT / "bridge" / "local_bridge.py"
 TMUX_SOCKET = "instance-identity-poc"
 SESSION = "instance-identity-poc"
 STATE = pathlib.Path("/tmp/instance-identity-state.json")
+HISTORY = pathlib.Path("/tmp/instance-identity-history.jsonl")
 LOCK = pathlib.Path(f"{STATE}.lock")
 CONTROL_1 = pathlib.Path("/tmp/instance-identity-control-1.sock")
 EVENT_1 = pathlib.Path("/tmp/instance-identity-event-1.sock")
@@ -49,6 +50,8 @@ def start(control, event, pane):
             str(event),
             "--state-file",
             str(STATE),
+            "--history-file",
+            str(HISTORY),
             "--allow-pane",
             pane,
         ],
@@ -89,7 +92,7 @@ def stop(process):
 def cleanup():
     tmux("kill-server", check=False)
     for path in (
-        STATE, LOCK, CONTROL_1, EVENT_1, CONTROL_2, EVENT_2
+        STATE, HISTORY, LOCK, CONTROL_1, EVENT_1, CONTROL_2, EVENT_2
     ):
         if path.exists():
             path.unlink()

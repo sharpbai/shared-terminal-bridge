@@ -18,6 +18,7 @@ RUN_ID = os.getpid()
 CONTROL_SOCKET = pathlib.Path(f"/tmp/live-tmux-acceptance-{RUN_ID}-control.sock")
 EVENT_SOCKET = pathlib.Path(f"/tmp/live-tmux-acceptance-{RUN_ID}-events.sock")
 STATE_FILE = pathlib.Path(f"/tmp/live-tmux-acceptance-{RUN_ID}-state.json")
+HISTORY_FILE = pathlib.Path(f"/tmp/live-tmux-acceptance-{RUN_ID}-history.jsonl")
 WINDOW_NAME = "bridge-acceptance"
 ALLOWED_MARKER = "LIVE_BRIDGE_ACTION_ALLOWED"
 STALE_MARKER = "LIVE_BRIDGE_STALE_ACTION_MUST_NOT_APPEAR"
@@ -162,7 +163,7 @@ def main():
     binding_installed = False
     checks = {}
 
-    for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE, pathlib.Path(f"{STATE_FILE}.lock")):
+    for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE, HISTORY_FILE, pathlib.Path(f"{STATE_FILE}.lock")):
         if path.exists():
             path.unlink()
 
@@ -196,6 +197,8 @@ def main():
                 test_pane,
                 "--state-file",
                 str(STATE_FILE),
+                "--history-file",
+                str(HISTORY_FILE),
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
@@ -341,7 +344,7 @@ def main():
             except subprocess.TimeoutExpired:
                 server.kill()
                 server.wait(timeout=2)
-        for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE, pathlib.Path(f"{STATE_FILE}.lock")):
+        for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE, HISTORY_FILE, pathlib.Path(f"{STATE_FILE}.lock")):
             if path.exists():
                 path.unlink()
 

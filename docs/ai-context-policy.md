@@ -85,6 +85,29 @@ Bridge 校验 lease，捕获当前 pane 快照并立即返回 `block_id`。它�
 任务完成，因此 `exit_code` 始终为 `null`。真人 Ctrl+C 会正常送达前台进程、
 撤销 generation，并使 block 报告 `INTERRUPTED`；调用方必须停止本轮后续操作。
 
+### API v8：只读 `terminal_task_block_execute`
+
+原有 `terminal_task_block` 的“只记录、不执行”语义保持不变。需要压缩确定性只读
+步骤的模型往返时，调用独立的 `terminal_task_block_execute`：
+
+- 一块最多 8 步、总运行预算最多 120 秒；
+- Runner 位于本地 daemon，不向目标环境传输脚本；
+- 每一步仍产生独立、可查询、可审计的 terminal job；
+- 每一步发送前重新校验 pane、lease、generation 和 Human Override；
+- 支持 `contains`、`not_contains`、`regex` 三种确定性断言；
+- 返回每步最多 2 KiB 摘要和 `job://` 输出引用；
+- Human Ctrl+C、交互提示、job 非正常完成或断言失败时停止；
+- v1 只允许保守白名单内的单个只读命令，禁止 shell 控制符、重定向和展开。
+
+Runner 不判断业务语义。需要依据输出选择路径、需要审批或涉及修改时，仍应回到
+模型或使用单步 `terminal_submit`。
+
+### API v9：程序能力画像
+
+`terminal_program_profile` 仅返回 Bridge 本地的已知能力指引，不读写 pane。
+全屏程序按“官方 CLI/CMD/batch → 人类辅助 TUI → Agent 受限 TUI”选路。
+画像不代表目标机安装版本必然支持，必须先用安全版本探测确认。
+
 ## 明确边界
 
 - v0.2 的增量算法基于 tmux snapshot suffix overlap，不是字节级 PTY journal。
@@ -117,8 +140,8 @@ SHA-256 绑定批准，不要求用户复述命令。`terminal_long_run_approve`
 
 ## 长任务 Job 等待
 
-`terminal_submit` 为每次显式命令返回 `job_id`。`terminal_wait_job` 最长在
-Bridge 本地等待 10 分钟，期间不重复调用模型；命令完成、Human Ctrl+C、出现
+`terminal_submit` 为每次显式命令返回 `job_id`。`terminal_wait_job` 默认通过
+一次调用在 Bridge 本地等待最多 10 分钟，期间不按分钟重复调用模型；命令完成、Human Ctrl+C、出现
 密码/确认提示或到达人工决策点时立即返回。10 分钟仍无结论返回
 `STRATEGY_REVIEW_REQUIRED`，调用方必须比较继续等待与替代方案；只有存在可信、
 有意义的活动证据时才继续下一段等待。
@@ -133,6 +156,33 @@ MCP adapter 并发处理 stdio 请求。每次等待分配独立 `wait_id`；Cod
 `terminal_cancel_wait`，Bridge 直接设置对应 Event 唤醒等待线程。取消等待返回
 `WAIT_CANCELLED`，不会改变 job 状态，也不会向 pane 发送 Ctrl+C。后续用户消息
 可以越过旧 wait，立即查询或中断 job。
+
+wait 和普通 status 默认只返回状态、耗时与最近证据行，不回传完整 pane 历史。
+job 完成时 wait 同时返回由命令回显锚定的、有界 `output_excerpt`，正常路径无需
+追加 status 调用。只有显式诊断调用 `terminal_job_status(include_output=true)` 才返回
+更大的受预算约束 observation。
+
+若提交时 tmux 前台命令是 `ssh`、`mosh` 或 `telnet`，而等待期间前台命令发生
+变化，Bridge 立即返回 `NEEDS_ATTENTION/session_context_changed`。这用于识别
+Broken pipe 等远程上下文退出，避免继续等满 10 分钟。
+
+独立、轻量、只读的探测应组合为一条可见命令，以减少模型往返；修改操作、存在
+依赖关系的步骤及修改后的验证保持独立。性能回归目标是常规命令使用
+`submit + wait` 两次 MCP 调用完成，不再追加 status。
+
+## 持久交互历史
+
+Bridge 将租约、审批、显式提交、job 状态、Human/Agent 中断及有界 job 输出摘要
+追加到 `~/.local/state/shared-terminal-bridge/history.jsonl`。文件权限固定为 0600，
+daemon 重启后仍保留。普通 `terminal_type` 只记录字节数；密码输入不会落盘，命令中
+明显的 password/token/secret 赋值会整体脱敏。
+
+可通过 `terminal_history` 或以下命令查询：
+
+```bash
+stb history verify33 --limit 100
+stb history verify33 --action SUBMIT --json
+```
 
 未知命令不再从任意百分号推断进度。`progress` 默认为 null，仅保留有界的
 `last_evidence_lines`、`last_meaningful_activity_at` 和提示符状态；未来只有带证据的
@@ -151,6 +201,7 @@ MCP 在 discovery/tool listing 时读取这一信息：
 - API v3 及以上才发布本地 wait、长任务批准和按会话名观察工具；
 - API v4 及以上才发布结构化长任务待批准请求；
 - API v5 及以上发布终端 job 状态，API v6 及以上发布可事件取消的本地等待工具；
+- API v7 及以上发布持久历史，API v8 及以上发布只读 TaskBlockRunner，API v9 及以上发布程序能力画像；
 - 旧 daemon 不认识 `bridge_info` 时隐藏上述工具，并报告
   `bridgeCompatibility.status=restart_required`；
 - 客户端若缓存了旧工具目录并继续调用，MCP 返回 `BRIDGE_RESTART_REQUIRED`，不再

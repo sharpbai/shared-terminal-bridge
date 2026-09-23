@@ -16,6 +16,7 @@ DEFAULT_EVENT_SOCKET = pathlib.Path("/tmp/shared-terminal-events.sock")
 DEFAULT_STATE_FILE = pathlib.Path("/tmp/shared-terminal-bridge-state.json")
 DEFAULT_PID_FILE = pathlib.Path("/tmp/shared-terminal-bridge.pid")
 DEFAULT_LOG_FILE = pathlib.Path("/tmp/shared-terminal-bridge.log")
+DEFAULT_HISTORY_FILE = pathlib.Path.home() / ".local/state/shared-terminal-bridge/history.jsonl"
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BRIDGE_SCRIPT = PROJECT_ROOT / "bridge" / "local_bridge.py"
 SESSION_FORMAT = "\t".join(
@@ -171,8 +172,17 @@ def start_bridge_daemon(tmux_socket, bridge_socket):
         )
 
     bootstrap = None
+    stale_state_backup = None
     probe = tmux(tmux_socket, "list-sessions", capture=True, check=False)
     if probe.returncode != 0:
+        # The persisted pane/lease identities belong to a tmux server that no
+        # longer exists. Preserve them for diagnosis, but do not attach them to
+        # the new server that new-session is about to create.
+        if DEFAULT_STATE_FILE.exists():
+            stale_state_backup = DEFAULT_STATE_FILE.with_name(
+                f"{DEFAULT_STATE_FILE.stem}.orphaned-{int(time.time())}.json"
+            )
+            DEFAULT_STATE_FILE.replace(stale_state_backup)
         bootstrap = f"__stb_bootstrap_{os.getpid()}"
         tmux(tmux_socket, "new-session", "-d", "-s", bootstrap)
 
@@ -190,6 +200,8 @@ def start_bridge_daemon(tmux_socket, bridge_socket):
             str(DEFAULT_EVENT_SOCKET),
             "--state-file",
             str(DEFAULT_STATE_FILE),
+            "--history-file",
+            str(DEFAULT_HISTORY_FILE),
             "--allow-session-management",
         ],
         stdin=subprocess.DEVNULL,
@@ -210,6 +222,9 @@ def start_bridge_daemon(tmux_socket, bridge_socket):
                 "pid": process.pid,
                 "already_running": False,
                 "bootstrap": bootstrap,
+                "stale_state_backup": (
+                    str(stale_state_backup) if stale_state_backup else None
+                ),
             }
         if process.poll() is not None:
             break
@@ -287,6 +302,7 @@ def parser():
             "  stb lease my-session\n"
             "  stb approvals\n"
             "  stb jobs\n"
+            "  stb history verify33\n"
             "  stb job job_a1b2c3d4e5f6\n"
             "  stb waits\n"
             "  stb cancel-wait wait_a1b2c3d4e5f6\n"
@@ -442,6 +458,15 @@ def parser():
         subparsers.add_parser("interrupt", help="向终端任务发送 Agent Ctrl+C")
     )
     interrupt.add_argument("job_id", metavar="任务ID", help="例如 job_a1b2c3d4e5f6")
+
+    history = configure_help(
+        subparsers.add_parser("history", help="查看持久化的 tmux/STB 交互历史")
+    )
+    history.add_argument("name", nargs="?", metavar="会话", help="按托管会话名称筛选")
+    history.add_argument("--pane", metavar="面板", help="按 pane ID 筛选")
+    history.add_argument("--action", metavar="动作", help="按动作类型筛选")
+    history.add_argument("--limit", type=int, default=100, metavar="条数", help="返回最近记录数（1-1000）")
+    history.add_argument("--json", action="store_true", help="输出机器可读的 JSON")
 
     daemon = configure_help(
         subparsers.add_parser("daemon", help="启动、查看或停止后台 Bridge")
@@ -639,6 +664,29 @@ def main():
                 {"pane": job["pane"], "generation": job["generation"]},
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif args.command == "history":
+            result = bridge_call(
+                args.bridge_socket,
+                "terminal_history",
+                {
+                    "session": args.name,
+                    "pane": args.pane,
+                    "action": args.action,
+                    "limit": args.limit,
+                },
+            )
+            entries = result.get("entries", [])
+            if args.json:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            elif not entries:
+                print("没有匹配的交互历史。")
+            else:
+                print(f"交互历史：{len(entries)} 条")
+                for entry in entries:
+                    target = entry.get("session") or entry.get("pane") or "-"
+                    summary = entry.get("command") or entry.get("state") or entry.get("reason") or ""
+                    print(f"{entry.get('timestamp', '')}  {entry.get('action', ''):<20} {target}  {summary}")
+                print(f"\n历史文件：{result.get('history_file', '')}")
         elif args.command == "daemon":
             if args.action == "start":
                 result = start_bridge_daemon(args.tmux_socket, args.bridge_socket)
@@ -646,6 +694,11 @@ def main():
                     print("Bridge daemon 已在运行。")
                 else:
                     print(f"Bridge daemon 已启动，PID：{result['pid']}")
+                    if result.get("stale_state_backup"):
+                        print(
+                            "已归档失联 tmux server 的旧状态："
+                            f"{result['stale_state_backup']}"
+                        )
             elif args.action == "status":
                 running, pid = bridge_process_running()
                 available = bridge_available(args.bridge_socket)

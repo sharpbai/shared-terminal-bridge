@@ -33,8 +33,9 @@ MANAGED_HISTORY_LIMIT = 100000
 DEFAULT_CONTROL_SOCKET = pathlib.Path("/tmp/shared-terminal-bridge.sock")
 DEFAULT_EVENT_SOCKET = pathlib.Path("/tmp/shared-terminal-events.sock")
 DEFAULT_STATE_FILE = pathlib.Path("/tmp/shared-terminal-bridge-state.json")
-BRIDGE_API_VERSION = 6
-BRIDGE_VERSION = "0.10.0"
+DEFAULT_HISTORY_FILE = pathlib.Path.home() / ".local/state/shared-terminal-bridge/history.jsonl"
+BRIDGE_API_VERSION = 9
+BRIDGE_VERSION = "0.14.0"
 DEFAULT_WAIT_MS = 10_000
 DEFAULT_IDLE_BUDGET_MS = 30_000
 DEFAULT_TOTAL_BUDGET_MS = 60_000
@@ -46,11 +47,63 @@ LONG_RUN_REQUEST_TTL_MS = 60 * 60 * 1000
 MAX_JOB_WAIT_MS = 600_000
 JOB_POLL_INTERVAL_SECONDS = 0.5
 JOB_PROMPT_STABLE_MS = 1_500
+REMOTE_TRANSPORT_COMMANDS = {"ssh", "mosh", "telnet"}
 JOB_TERMINAL_STATES = {
     "COMPLETED",
     "INTERRUPTED_BY_HUMAN",
     "NEEDS_ATTENTION",
     "HUMAN_DECISION_REQUIRED",
+}
+TASK_BLOCK_MAX_STEPS = 8
+TASK_BLOCK_MAX_DURATION_MS = 120_000
+READ_ONLY_COMMANDS = {
+    "blkid", "cat", "cut", "date", "df", "du", "fdisk", "file", "findmnt", "free", "grep",
+    "head", "hostname", "id", "iostat", "journalctl", "ls", "lsblk", "lscpu",
+    "lsmod", "lsof", "pgrep", "ps", "pwd", "qemu-img", "qemu-nbd", "sort", "stat", "systemctl",
+    "tail", "test", "testdisk", "uname", "uptime", "virsh", "vmstat", "wc", "whoami",
+}
+
+# Guidance only: installed versions and supported arguments must still be
+# verified. Keeping this local avoids probing or modifying the target shell.
+PROGRAM_CAPABILITY_PROFILES = {
+    "testdisk": {
+        "program": "testdisk",
+        "preferred_interface": "cmd",
+        "safe_probe": "testdisk /version",
+        "interfaces": ["/cmd scripted commands", "interactive TUI"],
+        "guidance": [
+            "Prefer the official /cmd interface for repeatable analysis or listing.",
+            "For selective recovery, confirm that the installed version and filesystem support the required scripted operation.",
+            "If scripting is insufficient, ask the human to navigate to a named TUI checkpoint, then observe once.",
+        ],
+        "tui_policy": "human_assisted",
+        "references": ["https://www.cgsecurity.org/testdisk_doc/scripted_run.html"],
+    },
+    "photorec": {
+        "program": "photorec",
+        "preferred_interface": "cmd",
+        "safe_probe": "photorec /version",
+        "interfaces": ["/cmd scripted commands", "/d output directory", "interactive TUI"],
+        "guidance": [
+            "Prefer /cmd and fileopt/search for repeatable recovery runs.",
+            "Treat recovery as a write-producing, potentially high-I/O long run requiring explicit approval.",
+            "Use human-assisted TUI only when scripting cannot express the selection.",
+        ],
+        "tui_policy": "human_assisted",
+        "references": ["https://www.cgsecurity.org/testdisk_doc/photorec.html"],
+    },
+}
+READ_ONLY_SUBCOMMANDS = {
+    "qemu-img": {"info", "measure", "map"},
+    "virsh": {
+        "capabilities", "domblkinfo", "domblklist", "domifaddr", "domiflist",
+        "dominfo", "domstate", "dumpxml", "list", "nodeinfo", "pool-info",
+        "pool-list", "snapshot-list", "version", "vol-info", "vol-list",
+    },
+    "systemctl": {
+        "is-active", "is-enabled", "is-failed", "list-dependencies",
+        "list-unit-files", "list-units", "show", "status",
+    },
 }
 
 
@@ -212,6 +265,13 @@ class TmuxBackend:
     def send_key(self, pane: str, key: str):
         self.run("send-keys", "-t", pane, key)
 
+    def submit(self, pane: str, text: str):
+        """Queue literal text and Enter in one ordered tmux invocation."""
+        self.run(
+            "send-keys", "-t", pane, "-l", text,
+            ";", "send-keys", "-t", pane, "Enter",
+        )
+
     def list_managed_sessions(self):
         result = self.run(
             "list-sessions",
@@ -261,13 +321,15 @@ class TmuxBackend:
         exists = self.run("has-session", "-t", name, check=False)
         if exists.returncode == 0:
             raise BridgeError("SESSION_ALREADY_EXISTS", session=name)
+        # A fresh named tmux socket has no server yet. new-session is the
+        # operation that starts it; global options cannot be set beforehand.
+        self.run("new-session", "-d", "-s", name, "-c", cwd)
         self.run(
             "set-option",
             "-g",
             "history-limit",
             str(MANAGED_HISTORY_LIMIT),
         )
-        self.run("new-session", "-d", "-s", name, "-c", cwd)
         managed_id = str(uuid.uuid4())
         created_at = now()
         self.run("set-option", "-t", name, "@shared_terminal_managed", "1")
@@ -431,6 +493,7 @@ class LocalBridge:
         event_socket: pathlib.Path,
         allowed_panes,
         state_file: pathlib.Path,
+        history_file: pathlib.Path = DEFAULT_HISTORY_FILE,
         allow_session_management: bool = False,
     ):
         self.tmux = TmuxBackend(tmux_socket)
@@ -440,6 +503,7 @@ class LocalBridge:
         self.allow_session_management = allow_session_management
         self.managed_sessions = {}
         self.state_file = state_file
+        self.history_file = history_file
         self.instance_lock_path = pathlib.Path(f"{state_file}.lock")
         self.instance_lock_file = None
         self.acquire_instance_lock()
@@ -565,6 +629,8 @@ class LocalBridge:
             # parser supplies evidence.
             job["progress"] = None
             job.setdefault("last_evidence_lines", [])
+            job.setdefault("output_excerpt", None)
+            job.setdefault("baseline_pane_command", None)
             job.setdefault("last_meaningful_activity_at", None)
             submitted_at_ms = int(job.get("submitted_at_ms", unix_ms()))
             expected_duration_ms = int(
@@ -606,6 +672,18 @@ class LocalBridge:
             self.persist_state()
 
     def record(self, action: str, **fields):
+        pane = fields.get("pane")
+        if pane and "session" not in fields:
+            session = next(
+                (
+                    item.get("name")
+                    for item in self.managed_sessions.values()
+                    if item.get("pane") == pane
+                ),
+                None,
+            )
+            if session:
+                fields["session"] = session
         entry = {
             "timestamp": now(),
             "action": action,
@@ -613,6 +691,42 @@ class LocalBridge:
         }
         with self.lock:
             self.audit.append(entry)
+            history_file = getattr(self, "history_file", None)
+            if history_file is not None:
+                history_file.parent.mkdir(parents=True, exist_ok=True)
+                with history_file.open("a", encoding="utf-8") as stream:
+                    stream.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+                os.chmod(history_file, 0o600)
+
+    def terminal_history(
+        self, session: str = None, pane: str = None, action: str = None, limit: int = 100
+    ):
+        try:
+            limit = int(limit)
+            if not 1 <= limit <= 1000:
+                raise ValueError
+        except (TypeError, ValueError) as error:
+            raise BridgeError("INVALID_HISTORY_LIMIT", limit=limit) from error
+        history_file = getattr(self, "history_file", None)
+        if history_file is None or not history_file.exists():
+            return {"entries": [], "history_file": str(history_file or "")}
+        entries = []
+        for line in reversed(history_file.read_text(encoding="utf-8", errors="replace").splitlines()):
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if session is not None and entry.get("session") != session:
+                continue
+            if pane is not None and entry.get("pane") != pane:
+                continue
+            if action is not None and entry.get("action") != action:
+                continue
+            entries.append(entry)
+            if len(entries) >= limit:
+                break
+        entries.reverse()
+        return {"entries": entries, "history_file": str(history_file)}
 
     def authorize(self, pane: str):
         if pane not in self.allowed_panes:
@@ -668,8 +782,11 @@ class LocalBridge:
             "terminal_wait_job": self.terminal_wait_job,
             "terminal_wait_list": self.terminal_wait_list,
             "terminal_cancel_wait": self.terminal_cancel_wait,
+            "terminal_history": self.terminal_history,
             "terminal_task_block": self.terminal_task_block,
+            "terminal_task_block_execute": self.terminal_task_block_execute,
             "terminal_task_observe": self.terminal_task_observe,
+            "terminal_program_profile": self.terminal_program_profile,
             "terminal_key": self.terminal_key,
             "terminal_interrupt": self.terminal_interrupt,
             "audit_log": self.audit_log,
@@ -713,8 +830,11 @@ class LocalBridge:
             "terminal_wait_job",
             "terminal_wait_list",
             "terminal_cancel_wait",
+            "terminal_history",
             "terminal_task_block",
+            "terminal_task_block_execute",
             "terminal_task_observe",
+            "terminal_program_profile",
             "terminal_key",
             "terminal_interrupt",
             "audit_log",
@@ -744,6 +864,25 @@ class LocalBridge:
             )
         self.record("LIST", panes=len(panes))
         return {"panes": panes}
+
+    def terminal_program_profile(self, program=None):
+        """Return local guidance without reading or writing a terminal pane."""
+        if program is None:
+            return {
+                "profiles": [
+                    {
+                        "program": name,
+                        "preferred_interface": profile["preferred_interface"],
+                        "tui_policy": profile["tui_policy"],
+                    }
+                    for name, profile in sorted(PROGRAM_CAPABILITY_PROFILES.items())
+                ]
+            }
+        normalized = pathlib.PurePath(str(program).strip()).name.lower()
+        profile = PROGRAM_CAPABILITY_PROFILES.get(normalized)
+        if profile is None:
+            raise BridgeError("PROGRAM_PROFILE_NOT_FOUND", program=normalized)
+        return {"profile": dict(profile)}
 
     def require_session_management(self):
         if not self.allow_session_management:
@@ -1191,6 +1330,19 @@ class LocalBridge:
             if previous and previous.get("state") == "ACTIVE" and thread_id:
                 previous_auth = previous.get("authorization") or {}
                 if (
+                    previous_auth.get("thread_id") == thread_id
+                    and previous_auth.get("turn_id") == turn_id
+                    and previous_auth.get("turn_started_at_ms") == turn_started_at_ms
+                ):
+                    result = dict(previous)
+                    result["idempotent"] = True
+                    self.record(
+                        "LEASE_REUSE",
+                        pane=pane,
+                        generation=previous.get("generation"),
+                    )
+                    return result
+                if (
                     previous_auth.get("thread_id") != thread_id
                     or not previous_auth.get("turn_started_at_ms")
                     or turn_started_at_ms <= previous_auth["turn_started_at_ms"]
@@ -1276,11 +1428,30 @@ class LocalBridge:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     @staticmethod
+    def _history_command(text: str):
+        sensitive = re.compile(
+            r"(password|passwd|api[_-]?key|access[_-]?token|secret)\s*(=|:)|"
+            r"\b(export|setenv)\b.*(token|secret|password|key)",
+            re.IGNORECASE,
+        )
+        return "[REDACTED_SENSITIVE_COMMAND]" if sensitive.search(text) else text
+
+    @staticmethod
     def _validate_long_run_budget(
-        expected_duration_ms, idle_budget_ms, total_budget_ms
+        expected_duration_ms, idle_budget_ms=None, total_budget_ms=None
     ):
         try:
             expected_duration_ms = int(expected_duration_ms)
+            if total_budget_ms is None:
+                total_budget_ms = min(
+                    MAX_TOTAL_BUDGET_MS,
+                    max(expected_duration_ms, expected_duration_ms * 2),
+                )
+            if idle_budget_ms is None:
+                idle_budget_ms = min(
+                    total_budget_ms,
+                    max(DEFAULT_IDLE_BUDGET_MS, expected_duration_ms // 2),
+                )
             idle_budget_ms = int(idle_budget_ms)
             total_budget_ms = int(total_budget_ms)
             if expected_duration_ms < 1 or not 1 <= idle_budget_ms <= total_budget_ms:
@@ -1314,8 +1485,8 @@ class LocalBridge:
         text: str,
         expected_duration_ms: int,
         resource_class: str,
-        idle_budget_ms: int,
-        total_budget_ms: int,
+        idle_budget_ms: int = None,
+        total_budget_ms: int = None,
     ):
         """Create a durable, non-executing approval request for one command."""
         lease = self.require_lease(pane, generation)
@@ -1545,7 +1716,10 @@ class LocalBridge:
         allowance = max(expected_duration_ms * 3, 20 * 60 * 1000)
         return submitted_at_ms + allowance
 
-    def _create_job(self, pane, generation, text, expected_duration_ms, resource_class, baseline):
+    def _create_job(
+        self, pane, generation, text, expected_duration_ms, resource_class,
+        baseline, baseline_pane_command=None,
+    ):
         job_id = f"job_{uuid.uuid4().hex[:12]}"
         submitted_at_ms = unix_ms()
         job = {
@@ -1566,11 +1740,13 @@ class LocalBridge:
             "strategy_review_at_ms": submitted_at_ms + 10 * 60 * 1000,
             "baseline_content": baseline,
             "baseline_prompt": self._last_nonempty_line(baseline),
+            "baseline_pane_command": baseline_pane_command,
             "last_content": baseline,
             "last_change_ms": submitted_at_ms,
             "last_activity_at": now(),
             "progress": None,
             "last_evidence_lines": [],
+            "output_excerpt": None,
             "last_meaningful_activity_at": None,
             "notification_sent": False,
         }
@@ -1588,7 +1764,13 @@ class LocalBridge:
                     break
                 self.jobs.pop(removable, None)
             self.persist_state()
-        self.record("JOB_CREATE", pane=pane, generation=generation, job_id=job_id)
+        self.record(
+            "JOB_CREATE", pane=pane, generation=generation, job_id=job_id,
+            command=self._history_command(text),
+            command_fingerprint=job["command_fingerprint"],
+            expected_duration_ms=expected_duration_ms,
+            resource_class=resource_class,
+        )
         return job
 
     @staticmethod
@@ -1600,6 +1782,124 @@ class LocalBridge:
             "press enter", "are you sure you want to continue connecting",
         )
         return next((pattern for pattern in patterns if pattern in tail), None)
+
+    @staticmethod
+    def _command_completeness(text: str):
+        """Reject only definite local-input incompleteness; never expand or run it."""
+        if "\x00" in text:
+            return "nul_byte"
+        if "\n" in text or "\r" in text:
+            return "multiline_not_supported"
+        if text.rstrip().endswith("\\"):
+            return "trailing_continuation"
+        try:
+            shlex.split(text, posix=True)
+        except ValueError as error:
+            if "No closing quotation" in str(error):
+                return "unclosed_quote"
+        return None
+
+    @classmethod
+    def _validate_read_only_command(cls, text: str):
+        incomplete = cls._command_completeness(text)
+        if incomplete:
+            raise BridgeError("COMMAND_INCOMPLETE", reason=incomplete)
+        # Runner v1 intentionally accepts one simple command, not shell programs.
+        if re.search(r"(?:[;&|<>`]|\$\(|\$\{|\n|\r)", text):
+            raise BridgeError(
+                "TASK_BLOCK_COMMAND_NOT_READ_ONLY",
+                reason="shell control operators, redirection, and expansion are not supported",
+                command=cls._history_command(text),
+            )
+        try:
+            tokens = shlex.split(text, posix=True)
+        except ValueError as error:
+            raise BridgeError("COMMAND_INCOMPLETE", reason=str(error)) from error
+        if not tokens:
+            raise BridgeError("INVALID_TASK_BLOCK", reason="empty command")
+        executable = pathlib.PurePath(tokens[0]).name
+        if executable not in READ_ONLY_COMMANDS:
+            raise BridgeError(
+                "TASK_BLOCK_COMMAND_NOT_READ_ONLY",
+                reason="executable is not in the read-only allowlist",
+                executable=executable,
+            )
+        allowed_subcommands = READ_ONLY_SUBCOMMANDS.get(executable)
+        if allowed_subcommands:
+            subcommand = next((token for token in tokens[1:] if not token.startswith("-")), None)
+            if subcommand not in allowed_subcommands:
+                raise BridgeError(
+                    "TASK_BLOCK_COMMAND_NOT_READ_ONLY",
+                    reason="subcommand is not in the read-only allowlist",
+                    executable=executable,
+                    subcommand=subcommand,
+                )
+        if executable == "journalctl" and any(
+            token == "--rotate"
+            or token == "--flush"
+            or token == "--sync"
+            or token == "--relinquish-var"
+            or token.startswith("--vacuum")
+            for token in tokens[1:]
+        ):
+            raise BridgeError(
+                "TASK_BLOCK_COMMAND_NOT_READ_ONLY",
+                reason="journal mutation option is not allowed",
+                executable=executable,
+            )
+        if executable == "fdisk":
+            if len(tokens) != 3 or tokens[1] not in ("-l", "--list"):
+                raise BridgeError(
+                    "TASK_BLOCK_COMMAND_NOT_READ_ONLY",
+                    reason="fdisk Runner only permits: fdisk -l|--list TARGET",
+                    executable=executable,
+                )
+        if executable == "blkid":
+            index = 1
+            saw_probe = False
+            saw_target = False
+            while index < len(tokens):
+                token = tokens[index]
+                if token in ("-p", "--probe"):
+                    saw_probe = True
+                elif token in ("-O", "--offset"):
+                    index += 1
+                    if index >= len(tokens) or not tokens[index].isdigit():
+                        raise BridgeError(
+                            "TASK_BLOCK_COMMAND_NOT_READ_ONLY",
+                            reason="blkid offset must be a non-negative integer",
+                            executable=executable,
+                        )
+                elif token.startswith("-") or saw_target:
+                    raise BridgeError(
+                        "TASK_BLOCK_COMMAND_NOT_READ_ONLY",
+                        reason="blkid Runner only permits -p [ -O OFFSET ] TARGET",
+                        executable=executable,
+                    )
+                else:
+                    saw_target = True
+                index += 1
+            if not saw_probe or not saw_target:
+                raise BridgeError(
+                    "TASK_BLOCK_COMMAND_NOT_READ_ONLY",
+                    reason="blkid Runner requires -p and one TARGET",
+                    executable=executable,
+                )
+        if executable == "testdisk" and tokens[1:] not in (
+            ["/version"], ["--version"], ["-version"], ["/v"],
+        ):
+            raise BridgeError(
+                "TASK_BLOCK_COMMAND_NOT_READ_ONLY",
+                reason="testdisk Runner permits a version probe only",
+                executable=executable,
+            )
+        if executable == "qemu-nbd" and tokens[1:] not in (["--version"], ["-V"]):
+            raise BridgeError(
+                "TASK_BLOCK_COMMAND_NOT_READ_ONLY",
+                reason="qemu-nbd Runner permits a version probe only",
+                executable=executable,
+            )
+        return tokens
 
     def _notify_job(self, job):
         if (
@@ -1666,6 +1966,12 @@ class LocalBridge:
                 self._signal_job_waits(job_id, state)
                 self._notify_job(job)
             return job
+        pane_command = None
+        if hasattr(self.tmux, "state"):
+            try:
+                pane_command = self.tmux.state(pane).get("current_command")
+            except BridgeError:
+                pass
         current_ms = unix_ms()
         changed = current != previous
         observation = AIContextPolicy.apply(
@@ -1676,13 +1982,18 @@ class LocalBridge:
             command_echo=job["command"],
         )
         delta_content = observation["content"]
+        output_excerpt = AIContextPolicy.job_output(
+            baseline, current, job["command"]
+        )
         human_override = bool(
             lease_snapshot
             and lease_snapshot.get("state") == "REVOKED"
             and lease_snapshot.get("event_seq") is not None
             and lease_snapshot.get("generation") == job["generation"]
         )
-        prompt = self._interaction_prompt(delta_content)
+        # Prompt detection is job-local. The generic delta can include stale pane
+        # history after scrollback shifts and must not trigger interaction.
+        prompt = self._interaction_prompt(output_excerpt["content"])
         last_line = self._last_nonempty_line(current)
         evidence_lines = [
             line for line in AIContextPolicy.normalize(delta_content)
@@ -1691,6 +2002,7 @@ class LocalBridge:
         with self.lock:
             if changed:
                 job["last_content"] = current
+                job["output_excerpt"] = output_excerpt
                 job["last_change_ms"] = current_ms
                 job["last_activity_at"] = now()
                 if evidence_lines:
@@ -1703,6 +2015,14 @@ class LocalBridge:
                 job["state"] = "NEEDS_ATTENTION"
                 job["attention_reason"] = prompt
                 job["completion_confidence"] = "heuristic"
+            elif (
+                job.get("baseline_pane_command") in REMOTE_TRANSPORT_COMMANDS
+                and pane_command
+                and pane_command != job.get("baseline_pane_command")
+            ):
+                job["state"] = "NEEDS_ATTENTION"
+                job["attention_reason"] = "session_context_changed"
+                job["completion_confidence"] = "tmux_state"
             elif (
                 job["baseline_prompt"]
                 and last_line == job["baseline_prompt"]
@@ -1719,12 +2039,17 @@ class LocalBridge:
             if state in JOB_TERMINAL_STATES:
                 self.persist_state()
         if state in JOB_TERMINAL_STATES:
-            self.record("JOB_STATE", pane=pane, job_id=job_id, state=state)
+            self.record(
+                "JOB_STATE", pane=pane, job_id=job_id, state=state,
+                attention_reason=job.get("attention_reason"),
+                completion_confidence=job.get("completion_confidence"),
+                output_excerpt=(job.get("output_excerpt") or {}).get("content", ""),
+            )
             self._signal_job_waits(job_id, state)
             self._notify_job(job)
         return job
 
-    def _job_result(self, job, include_output=True):
+    def _job_result(self, job, include_output=False):
         current_ms = unix_ms()
         result = {
             key: job.get(key) for key in (
@@ -1733,13 +2058,25 @@ class LocalBridge:
                 "completion_confidence", "submitted_at", "hard_deadline_ms",
                 "strategy_review_at_ms", "last_activity_at", "progress",
                 "last_meaningful_activity_at", "last_evidence_lines",
-                "attention_reason", "completed_at",
+                "attention_reason", "completed_at", "output_excerpt",
             )
         }
         result["elapsed_ms"] = max(0, current_ms - job["submitted_at_ms"])
         result["hard_deadline_remaining_ms"] = max(
             0, job["hard_deadline_ms"] - current_ms
         )
+        excerpt = job.get("output_excerpt") or {}
+        result["output_complete"] = (
+            job.get("state") == "COMPLETED"
+            and not bool(excerpt.get("omitted_lines") or excerpt.get("omitted_bytes"))
+        )
+        result["recommended_action"] = {
+            "COMPLETED": "CONTINUE",
+            "INTERRUPTED_BY_HUMAN": "STOP_CURRENT_TURN",
+            "NEEDS_ATTENTION": "MODEL_OR_HUMAN_DECISION",
+            "HUMAN_DECISION_REQUIRED": "HUMAN_DECISION",
+            "RUNNING": "WAIT",
+        }.get(job.get("state"), "INSPECT")
         if include_output:
             result["observation"] = AIContextPolicy.apply(
                 job["baseline_content"],
@@ -1769,8 +2106,10 @@ class LocalBridge:
         jobs.sort(key=lambda item: item["submitted_at"], reverse=True)
         return {"jobs": jobs}
 
-    def terminal_job_status(self, job_id: str):
-        return self._job_result(self._refresh_job(job_id))
+    def terminal_job_status(self, job_id: str, include_output: bool = False):
+        return self._job_result(
+            self._refresh_job(job_id), include_output=bool(include_output)
+        )
 
     def terminal_wait_list(self):
         with self.lock:
@@ -1833,12 +2172,12 @@ class LocalBridge:
         try:
             job = self._refresh_job(job_id)
             if job["state"] in JOB_TERMINAL_STATES:
-                result = self._job_result(job)
+                result = self._job_result(job, include_output=False)
                 result["wait_id"] = wait_id
                 return result
             event.wait(wait_ms / 1000)
             job = self._refresh_job(job_id)
-            result = self._job_result(job)
+            result = self._job_result(job, include_output=False)
             result["wait_id"] = wait_id
             if job["state"] in JOB_TERMINAL_STATES:
                 return result
@@ -1883,6 +2222,9 @@ class LocalBridge:
     ):
         """Type one literal command and press Enter under the same lease check."""
         self.require_lease(pane, generation)
+        incomplete = self._command_completeness(text)
+        if incomplete:
+            raise BridgeError("COMMAND_INCOMPLETE", reason=incomplete)
         try:
             expected_duration_ms = int(expected_duration_ms)
             if expected_duration_ms < 1:
@@ -1941,10 +2283,21 @@ class LocalBridge:
                     ),
                 )
         baseline = self.tmux.read(pane, JOB_CAPTURE_LINES)
-        self.tmux.send_text(pane, text)
-        self.tmux.send_key(pane, "Enter")
+        try:
+            baseline_pane_command = (
+                self.tmux.state(pane).get("current_command")
+                if hasattr(self.tmux, "state") else None
+            )
+        except BridgeError:
+            baseline_pane_command = None
+        if hasattr(self.tmux, "submit"):
+            self.tmux.submit(pane, text)
+        else:  # Minimal test doubles and third-party backends.
+            self.tmux.send_text(pane, text)
+            self.tmux.send_key(pane, "Enter")
         job = self._create_job(
-            pane, generation, text, expected_duration_ms, resource_class, baseline
+            pane, generation, text, expected_duration_ms, resource_class, baseline,
+            baseline_pane_command,
         )
         byte_count = len(text.encode())
         self.record(
@@ -1952,6 +2305,9 @@ class LocalBridge:
             pane=pane,
             generation=generation,
             bytes=byte_count,
+            job_id=job["job_id"],
+            command=self._history_command(text),
+            command_fingerprint=job["command_fingerprint"],
         )
         return {
             "accepted": True,
@@ -2022,6 +2378,180 @@ class LocalBridge:
             "explicit_submits_required": True,
             "state": "PLANNED",
         }
+
+    @staticmethod
+    def _task_assertion(assertion, content: str):
+        if assertion is None:
+            return {"passed": True, "type": None}
+        if not isinstance(assertion, dict) or len(assertion) != 1:
+            raise BridgeError(
+                "INVALID_TASK_BLOCK", reason="assert must contain exactly one predicate"
+            )
+        predicate, value = next(iter(assertion.items()))
+        if predicate not in {"contains", "not_contains", "regex"} or not isinstance(value, str):
+            raise BridgeError(
+                "INVALID_TASK_BLOCK", reason="unsupported assertion predicate"
+            )
+        if predicate == "contains":
+            passed = value in content
+        elif predicate == "not_contains":
+            passed = value not in content
+        else:
+            try:
+                passed = re.search(value, content) is not None
+            except re.error as error:
+                raise BridgeError("INVALID_TASK_BLOCK", reason="invalid assertion regex") from error
+        return {"passed": passed, "type": predicate, "value": value}
+
+    @staticmethod
+    def _compact_task_excerpt(excerpt, max_bytes=2048):
+        compact = dict(excerpt or {})
+        encoded = compact.get("content", "").encode("utf-8", errors="replace")
+        if len(encoded) > max_bytes:
+            omitted = len(encoded) - max_bytes
+            suffix = encoded[-max_bytes:].decode("utf-8", errors="ignore")
+            compact["content"] = f"[... {omitted} task-block bytes omitted ...]\n{suffix}"
+            compact["task_block_omitted_bytes"] = omitted
+        return compact
+
+    def terminal_task_block_execute(
+        self,
+        pane: str,
+        generation: int,
+        steps,
+        max_duration_ms: int = TASK_BLOCK_MAX_DURATION_MS,
+        stop_on_error: bool = True,
+    ):
+        """Run a bounded sequence of conservatively classified read-only jobs."""
+        self.require_lease(pane, generation)
+        if not isinstance(steps, list) or not 1 <= len(steps) <= TASK_BLOCK_MAX_STEPS:
+            raise BridgeError(
+                "INVALID_TASK_BLOCK",
+                reason=f"steps must contain 1..{TASK_BLOCK_MAX_STEPS} items",
+            )
+        try:
+            max_duration_ms = int(max_duration_ms)
+            if not 1 <= max_duration_ms <= TASK_BLOCK_MAX_DURATION_MS:
+                raise ValueError
+        except (TypeError, ValueError) as error:
+            raise BridgeError(
+                "INVALID_TASK_BLOCK", reason="max_duration_ms outside supported range"
+            ) from error
+
+        normalized = []
+        for index, step in enumerate(steps, 1):
+            if not isinstance(step, dict):
+                raise BridgeError("INVALID_TASK_BLOCK", reason="each step must be an object")
+            text = step.get("text")
+            if not isinstance(text, str) or not text.strip():
+                raise BridgeError("INVALID_TASK_BLOCK", reason="step text must be non-empty")
+            self._validate_read_only_command(text)
+            try:
+                expected = int(step.get("expected_duration_ms", 30_000))
+                if not 1 <= expected <= LONG_RUN_APPROVAL_MS:
+                    raise ValueError
+            except (TypeError, ValueError) as error:
+                raise BridgeError(
+                    "INVALID_TASK_BLOCK",
+                    reason="read-only step expected_duration_ms must be 1..120000",
+                ) from error
+            # Validate assertions before any terminal side effect.
+            self._task_assertion(step.get("assert"), "")
+            normalized.append(
+                {
+                    "step_id": step.get("step_id") or f"step-{index}",
+                    "text": text,
+                    "expected_duration_ms": expected,
+                    "assert": step.get("assert"),
+                }
+            )
+
+        block_id = f"tb_{uuid.uuid4().hex[:12]}"
+        started_ms = unix_ms()
+        block = {
+            "block_id": block_id,
+            "pane": pane,
+            "generation": generation,
+            "mode": "read_only_runner_v1",
+            "state": "RUNNING",
+            "created_at": now(),
+            "max_duration_ms": max_duration_ms,
+            "steps_total": len(normalized),
+            "steps": [],
+        }
+        with self.lock:
+            self.task_blocks[block_id] = block
+        self.record(
+            "TASK_BLOCK_START", pane=pane, generation=generation,
+            block_id=block_id, steps=len(normalized), mode=block["mode"],
+        )
+
+        for step in normalized:
+            elapsed = unix_ms() - started_ms
+            remaining = max_duration_ms - elapsed
+            if remaining <= 0:
+                block["state"] = "NEEDS_REPLAN"
+                block["stop_reason"] = "block_duration_exhausted"
+                break
+            # Re-check before every side effect so Ctrl+C or a newer turn stops
+            # all not-yet-started steps.
+            try:
+                self.require_lease(pane, generation)
+            except BridgeError as error:
+                with self.lock:
+                    lease = self.leases.get(pane) or {}
+                block["state"] = (
+                    "INTERRUPTED"
+                    if lease.get("state") == "REVOKED"
+                    else "NEEDS_ATTENTION"
+                )
+                block["stop_reason"] = error.code
+                break
+            submitted = self.terminal_submit(
+                pane,
+                generation,
+                step["text"],
+                min(step["expected_duration_ms"], remaining),
+                "normal",
+            )
+            job_id = submitted["job_id"]
+            result = self.terminal_wait_job(job_id, wait_ms=max(1, remaining))
+            excerpt = result.get("output_excerpt") or {}
+            assertion = self._task_assertion(step["assert"], excerpt.get("content", ""))
+            step_result = {
+                "step_id": step["step_id"],
+                "job_id": job_id,
+                "state": result["state"],
+                "completion_confidence": result.get("completion_confidence"),
+                "assertion": assertion,
+                "output_ref": f"job://{job_id}",
+                "output_excerpt": self._compact_task_excerpt(excerpt),
+            }
+            block["steps"].append(step_result)
+            if result["state"] != "COMPLETED" or not assertion["passed"]:
+                block["state"] = (
+                    "INTERRUPTED" if result["state"] == "INTERRUPTED_BY_HUMAN"
+                    else "NEEDS_ATTENTION"
+                )
+                block["stop_reason"] = (
+                    result.get("attention_reason")
+                    or ("assertion_failed" if not assertion["passed"] else result["state"])
+                )
+                if result["state"] != "COMPLETED" or stop_on_error:
+                    break
+
+        if block["state"] == "RUNNING":
+            block["state"] = "COMPLETED"
+        block["completed_at"] = now()
+        block["elapsed_ms"] = unix_ms() - started_ms
+        with self.lock:
+            self.task_blocks[block_id] = block
+        self.record(
+            "TASK_BLOCK_STATE", pane=pane, generation=generation,
+            block_id=block_id, state=block["state"],
+            steps_completed=len(block["steps"]), stop_reason=block.get("stop_reason"),
+        )
+        return dict(block)
 
     def terminal_task_observe(
         self,
@@ -2320,6 +2850,11 @@ def parse_args():
         type=pathlib.Path,
         default=DEFAULT_STATE_FILE,
     )
+    serve_parser.add_argument(
+        "--history-file",
+        type=pathlib.Path,
+        default=DEFAULT_HISTORY_FILE,
+    )
 
     call_parser = subparsers.add_parser("call")
     call_parser.add_argument("method")
@@ -2358,6 +2893,7 @@ def main():
             event_socket=args.event_socket,
             allowed_panes=args.allow_pane,
             state_file=args.state_file,
+            history_file=args.history_file,
             allow_session_management=args.allow_session_management,
         )
     except BridgeError as error:

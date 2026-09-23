@@ -19,6 +19,8 @@ class AIContextPolicy:
     DEFAULT_MAX_LINES = 200
     MAX_BYTES = 65_536
     MAX_LINES = 1_000
+    JOB_MAX_BYTES = 16_384
+    JOB_MAX_LINES = 100
 
     @staticmethod
     def normalize(content: str) -> list[str]:
@@ -117,3 +119,24 @@ class AIContextPolicy:
             "repeated_groups": repeated,
             "snapshot_fingerprint": cls.fingerprint(current),
         }
+
+    @classmethod
+    def job_output(cls, previous_content: str, current_content: str, command: str):
+        """Extract bounded output for one submitted command, resilient to scrollback shifts."""
+        current = cls.normalize(current_content)
+        command = command.strip()
+        anchor = None
+        for index in range(len(current) - 1, -1, -1):
+            if command and current[index].strip().endswith(command):
+                anchor = index
+                break
+        if anchor is not None:
+            lines = current[anchor + 1 :]
+        else:
+            lines = cls.delta(cls.normalize(previous_content), current)
+        return cls.apply(
+            "",
+            "\n".join(lines),
+            max_bytes=cls.JOB_MAX_BYTES,
+            max_lines=cls.JOB_MAX_LINES,
+        )

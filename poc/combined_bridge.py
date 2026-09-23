@@ -17,6 +17,7 @@ SESSION = "combined-bridge-poc"
 CONTROL_SOCKET = pathlib.Path("/tmp/combined-bridge-control.sock")
 EVENT_SOCKET = pathlib.Path("/tmp/combined-bridge-events.sock")
 STATE_FILE = pathlib.Path("/tmp/combined-bridge-state.json")
+HISTORY_FILE = pathlib.Path("/tmp/combined-bridge-history.jsonl")
 AUTHORIZED_MARKER = "COMBINED_ALLOWED_ACTION"
 STALE_MARKER = "COMBINED_STALE_ACTION"
 PRIVATE_MARKER = "COMBINED_PRIVATE_PANE"
@@ -169,7 +170,7 @@ def wait_for_revoked(pane: str):
 def main() -> int:
     args = parse_args()
     pane_a, pane_b = create_fixture()
-    for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE):
+    for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE, HISTORY_FILE):
         if path.exists():
             path.unlink()
 
@@ -188,6 +189,8 @@ def main() -> int:
             pane_a,
             "--state-file",
             str(STATE_FILE),
+            "--history-file",
+            str(HISTORY_FILE),
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
@@ -365,7 +368,7 @@ def main() -> int:
             server.kill()
             server.wait(timeout=2)
         tmux("kill-server", check=False)
-        for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE):
+        for path in (CONTROL_SOCKET, EVENT_SOCKET, STATE_FILE, HISTORY_FILE):
             if path.exists():
                 path.unlink()
 

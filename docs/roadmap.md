@@ -396,6 +396,72 @@ Human Override、后续用户 turn 重新授权和 root 只读下钻。三个回
 毫秒级，主要优化空间是任务块、增量读取、审批合并和 AI Context Policy。
 详见 [检查 local-33 磁盘占用 03 实操基线](baseline-live-ops-03.md)。
 
+**2026-09-21 模型编排调研与会话 13 复盘**：当前性能瓶颈已经从 Bridge RPC 和
+等待机制转移到复杂任务中的模型采样边界。会话 13 共记录 65 次命令提交；首次磁盘
+检查较会话 12 缩短约 33%，租约、长任务审批、Human Override 和持久历史均工作正常，
+但仍存在旧提示误判、重复 acquire、wait 后追加 status、明显引号错误和复杂步骤
+碎片化。下一阶段将先修复这些往返，再以版本化、本地执行且不向目标环境注入脚本的
+`TaskBlockRunner` 压缩模型编排次数。详见
+[模型编排轮数优化：调研与实施规划](model-orchestration-research-and-plan.md)。
+
+## 2026-09-21 下一阶段优先级
+
+1. **P0：当前 job 范围的提示检测**，消除旧密码提示造成的误中断。
+2. **P0：同 turn acquire 幂等**，已有有效租约时返回当前 generation。
+3. **P1：wait 终态完备化**，正常路径不再追加 status。
+4. **P1：保守命令完整性 lint**，在本地发现明显未闭合引号但不执行或展开命令。
+5. **P1：只读 TaskBlockRunner**，用新版本 API 连续执行受控步骤，旧 task block
+   保持只记录语义。
+6. **P1：写入后验证 block**，批准精确绑定单个写 step，验证步骤保持只读。
+7. **P2：循环/空增量本地检测**，只在真正决策边界唤醒模型。
+8. **P2：远程断线、取消和恢复实测**，覆盖 SSH Broken pipe 与 daemon restart。
+9. **P2：性能基准固化**，持续比较模型采样、MCP 调用、耗时和非缓存 token。
+
+**2026-09-21 实施进展**：P0/P1 基础修复及只读 TaskBlockRunner 首版已完成。
+Bridge/MCP 升级到 API v8 / v0.13.0；旧 `terminal_task_block` 保持只记录，新增
+`terminal_task_block_execute` 执行最多 8 个保守白名单只读步骤。当前 job 范围的
+提示检测、同 turn acquire 幂等、wait 终态提示、明显不完整命令拒绝均已加入测试。
+写入后验证、持久 block 恢复、循环检测和真实性能对比仍属于后续阶段。
+自动回归 63 项全部通过，隔离托管 tmux 中的两步只读 block 运行态验证完成；详见
+[API v8 只读 TaskBlockRunner 验证](validation-task-block-runner.md)。
+
+**2026-09-21 会话 14 复盘与 TUI 决策**：TaskBlockRunner 将首次磁盘检查 input
+降低约 30%，但 TestDisk 三个全屏交互回合产生 91 次按键、26 次屏幕读取，消耗约
+14.303M input tokens。近期不建设重型 TUI 支持；后续顺序调整为“程序原生 CMD/
+batch → 人类辅助操作 TUI → Agent 轻量操作 TUI”。全屏退出后的错位不是 pane 宽度
+不一致，而更接近 ncurses 模式恢复或按键越过 TUI 生命周期边界。详见
+[查看 local-33 磁盘占用 14 实操基线](baseline-live-ops-14.md)。
+
+## 2026-09-21 重新排序后的下一步
+
+1. **P0：程序 capability profile**：先覆盖 TestDisk/PhotoRec，再逐步记录已验证的
+   CMD、batch、list、dry-run、日志和结构化输出方式。
+2. **P0：精确扩充只读 Runner profile**：加入 `fdisk -l`、只读 `blkid`、
+   `testdisk /version`、`qemu-nbd --version`，不扩大为整个程序白名单。
+3. **P1：人工协同 TUI 工作流**：模型给出目标界面和连续操作提示，然后结束当前轮；
+   人到达检查点后再读取一次屏幕，不逐键遥控。
+4. **P1：写入后验证 block**：批准只绑定一个写 step，后续验证保持只读。
+5. **P1：本地循环/空增量检测**：没有有效变化时不触发模型。
+6. **P2：轻量 TUI 生命周期保护**：expected process、screen fingerprint、前台程序
+   变化后拒绝剩余按键、正常退出优先、强制退出后的 display check。
+7. **P2：轻量 TUI 降 token**：有限 key sequence 和 changed-row snapshot；不做
+   通用 TUI 控件识别、视觉模型或终端仿真。
+8. **P2：远程断线、取消与恢复实测**：覆盖 SSH Broken pipe 和 daemon restart。
+9. **P2：性能回归**：将会话 14 加入基准，分别统计普通命令与 TUI 段。
+
+**2026-09-21 实施进展（API v9 / v0.14.0）**：已完成 P0 与 P1 首批。
+新增 TestDisk/PhotoRec capability profile；Runner 精确支持 `fdisk -l TARGET`、
+`blkid -p [-O OFFSET] TARGET`、TestDisk 版本探测和 `qemu-nbd --version`，模板外
+参数仍 fail closed。MCP 已强制推荐人工检查点工作流；本轮未增加通用 TUI
+自动化，P2 生命周期保护与 changed-row 观察仍保留为后续。
+
+**2026-09-21 会话 15 回归**：14 个回合、10.1 分钟、4.73M input，相比会话 14
+分别下降约 7%、65% 和 79%，主要收益来自完全避开 TUI。首次磁盘检查
+input 基本持平，耗时由 28.5 秒升至 42.8 秒，说明后续优化重点仍是模型
+编排而非 Bridge RPC。剩余问题为一次多余 status、长任务显式使用 60 秒
+wait 以及 Skill 的每回合重复加载。详见
+[查看 local-33 磁盘占用 15 实操基线](baseline-live-ops-15.md)。
+
 ## 风险与开放问题
 
 - tmux 不同 key table 是否需要统一绑定策略。
