@@ -1,5 +1,7 @@
 # Shared Terminal Bridge
 
+> **项目导航** · **[Shared Terminal Bridge](https://github.com/sharpbai/shared-terminal-bridge)**（核心 Bridge） · [STB-RDC](https://github.com/sharpbai/shared-terminal-bridge-rdc)（ChatGPT/RDC 远程适配器） · [系列文档](https://github.com/sharpbai/shared-terminal-bridge-docs)（设计与演进记录）
+
 让人和 AI 在**同一个真实终端会话**中协作，并把观察、授权、中断和审计变成可控的系统边界。
 
 Shared Terminal Bridge（STB）是一个本地优先的交互式终端桥接层。人继续使用熟悉的 Terminal、tmux 和 SSH；Codex 或其他 MCP 客户端读取同一个 pane，并只在获得授权时向它输入。STB 不创建第二套隐藏 Shell，也不要求目标机器安装 Agent wrapper。
