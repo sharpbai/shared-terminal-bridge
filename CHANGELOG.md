@@ -5,6 +5,7 @@
 - 增加 GitHub Actions：Python 3.11/3.12 容器安全测试，以及独立宿主 runner 的真实 tmux 集成测试。
 - 为 Bridge 领域 service 增加显式依赖清单和运行时受限 `ServiceContext`，并以静态一致性测试阻止依赖静默扩张。
 - 统一 Bridge/MCP 版本来源，增加当前文档、CHANGELOG、MCP metadata 和 API feature gate 的版本一致性测试。
+- 修复 Linux tmux 初始托管 pane 未继承 10 万行历史上限的问题：在同一命令队列中先设置全局选项，再创建 session。
 
 ## v0.15.0 — 2026-09-24
 

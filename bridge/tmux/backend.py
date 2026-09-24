@@ -214,14 +214,23 @@ class TmuxBackend:
         exists = self.run("has-session", "-t", name, check=False)
         if exists.returncode == 0:
             raise BridgeError("SESSION_ALREADY_EXISTS", session=name)
-        # A fresh named tmux socket has no server yet. new-session is the
-        # operation that starts it; global options cannot be set beforehand.
-        self.run("new-session", "-d", "-s", name, "-c", cwd)
+        # history-limit is captured when a pane is created on some tmux
+        # versions. Run server bootstrap, the global option, and new-session
+        # in one command queue so the initial pane and future windows agree.
         self.run(
+            "start-server",
+            ";",
             "set-option",
             "-g",
             "history-limit",
             str(MANAGED_HISTORY_LIMIT),
+            ";",
+            "new-session",
+            "-d",
+            "-s",
+            name,
+            "-c",
+            cwd,
         )
         managed_id = str(uuid.uuid4())
         created_at = now()

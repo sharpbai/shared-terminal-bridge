@@ -4,7 +4,7 @@
 from tests.context_support import *  # noqa: F401,F403
 
 class ContextBridgeTest(unittest.TestCase):
-    def test_first_managed_session_starts_server_before_global_options(self):
+    def test_managed_session_sets_history_before_creating_initial_pane(self):
         tmux = TmuxBackend("fresh-server")
         calls = []
 
@@ -21,15 +21,25 @@ class ContextBridgeTest(unittest.TestCase):
         tmux.run = run
         created = tmux.create_managed_session("verify33", "/tmp")
 
-        new_session_index = next(
-            index for index, call in enumerate(calls) if call[0] == "new-session"
+        bootstrap = next(call for call in calls if call[0] == "start-server")
+        self.assertEqual(
+            bootstrap,
+            (
+                "start-server",
+                ";",
+                "set-option",
+                "-g",
+                "history-limit",
+                "100000",
+                ";",
+                "new-session",
+                "-d",
+                "-s",
+                "verify33",
+                "-c",
+                "/tmp",
+            ),
         )
-        global_option_index = next(
-            index
-            for index, call in enumerate(calls)
-            if call[:3] == ("set-option", "-g", "history-limit")
-        )
-        self.assertLess(new_session_index, global_option_index)
         self.assertEqual(created["pane"], "%0")
         self.assertEqual(created["history_limit"], 100000)
 
