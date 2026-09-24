@@ -16,7 +16,7 @@ Shared Terminal Bridge（STB）是一个本地优先的交互式终端桥接层�
 contract：用户明确选择 STB-RDC 后，RDC 只承担 transport/bootstrap，目标主机操作
 默认必须经过 STB；独立 RDC capability 需要一次性人工旁路批准。该 contract 让当前
 客户端 fail closed，但完整的宿主级物理隔离仍需 RDC/宿主支持 capability filtering。
-详见 [STB-RDC Exclusive Mode](docs/stb-rdc-exclusive-mode.md)和
+详见 [STB-RDC Exclusive Mode](docs/reference/stb-rdc-exclusive-mode.md)和
 [版本记录](CHANGELOG.md)。
 
 ## 为什么要做 STB
@@ -73,7 +73,7 @@ Human Ctrl+C ≠ automatic retry
 Human Ctrl+C = revoke the current Agent execution authority
 ```
 
-更完整的组件、状态和信任边界见[架构说明](docs/architecture.md)。
+更完整的组件、状态和信任边界见[架构说明](docs/reference/architecture.md)。
 
 ## 快速开始
 
@@ -115,7 +115,7 @@ cd shared-terminal-bridge
 ./stb stop disk-check               # 停止并清理托管会话
 ```
 
-常用安装方式、daemon 生命周期、人工授权和故障排查见[快速上手](docs/getting-started.md)。完整命令以 `stb --help` 和各子命令的 `--help` 为准。
+常用安装方式、daemon 生命周期、人工授权和故障排查见[快速上手](docs/guides/getting-started.md)。完整命令以 `stb --help` 和各子命令的 `--help` 为准。
 
 ## 接入 Codex / MCP
 
@@ -136,7 +136,7 @@ STB 的 MCP server 是 Bridge Unix socket 的 stdio 适配层。它不直接操�
 
 默认 MCP 只提供 Observation；只有显式启用 actions 后才注册写入工具。创建会话不等于取得执行权限，模型在首次写入前仍需为当前任务和用户回合取得新的 generation。
 
-详细工具、Codex Turn Identity、长任务批准和取消语义见[最小 MCP Server](docs/mcp-server.md)。
+详细工具、Codex Turn Identity、长任务批准和取消语义见[最小 MCP Server](docs/reference/mcp-server.md)。
 
 ## 安全与协作原则
 
@@ -153,23 +153,15 @@ STB 是协作与控制层，不是用户身份认证系统，也不是新的 Web
 
 ## 文档
 
-- [快速上手与日常管理](docs/getting-started.md)
-- [高层架构](docs/architecture.md)
-- [托管 tmux Session 与 `stb` 命令](docs/managed-sessions.md)
-- [MCP Server 与工具语义](docs/mcp-server.md)
-- [API v0.1](docs/api-v0.1.md)
-- [AI Context Policy](docs/ai-context-policy.md)
-- [STB-RDC Exclusive Mode](docs/stb-rdc-exclusive-mode.md)
-- [验证与回归索引](docs/validation-index.md)
-- [演进路线图](docs/roadmap.md)
-- [版本记录](CHANGELOG.md)
+从[文档导览](docs/README.md)按使用、原理、开发、验证或历史资料进入。
+版本变化见[版本记录](CHANGELOG.md)。
 
 ## 开发与验证
 
-运行自动化测试：
+默认单元测试可在容器内运行：
 
 ```bash
 python3 -m unittest discover -s tests -p 'test_*.py'
 ```
 
-涉及真实 tmux client 输入的验收需要人工按键，入口和历史验证记录统一收录在[验证与回归索引](docs/validation-index.md)。
+需要真实 tmux 的集成基线必须在容器外运行。完整命令和环境边界见[测试分层](docs/development/testing.md)；需要人工按键的验收入口和历史记录见[验证与回归索引](docs/validation/README.md)。
