@@ -1,5 +1,7 @@
 # Shared Terminal Bridge
 
+[![CI](https://github.com/sharpbai/shared-terminal-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/sharpbai/shared-terminal-bridge/actions/workflows/ci.yml)
+
 <p align="center"><a href="https://github.com/sharpbai/shared-terminal-bridge"><strong>STB Core</strong></a> · <a href="https://github.com/sharpbai/shared-terminal-bridge-rdc">RDC Adapter</a> · <a href="https://github.com/sharpbai/shared-terminal-bridge-docs">Documentation</a></p>
 
 让人和 AI 在**同一个真实终端会话**中协作，并把观察、授权、中断和审计变成可控的系统边界。
@@ -155,6 +157,21 @@ STB 是协作与控制层，不是用户身份认证系统，也不是新的 Web
 
 从[文档导览](docs/README.md)按使用、原理、开发、验证或历史资料进入。
 版本变化见[版本记录](CHANGELOG.md)。
+
+## 面向人与 Agent 的低成本维护
+
+STB 不只关注运行时的 Token 和上下文成本，也把代码本身设计成适合人和 Agent 共同阅读、定位和修改。目标不是追求最短代码或最多设计模式，而是在局部可理解、整体可导航和长期维护成本之间保持平衡。
+
+| 维护需求 | 项目中的处理方式 |
+| --- | --- |
+| 人快速理解项目 | README 负责产品概览，`docs/README.md` 按使用、原理、开发、验证和历史资料分流 |
+| Agent 避免读取整个仓库 | `AGENTS.md` 要求从最小上下文开始，通过小型 registry 定位对应功能域 |
+| 修改范围容易判断 | Bridge、MCP、CLI 和测试按相同功能域命名，代码结构文档提供“能力 → 实现 → 测试”映射 |
+| 防止跨领域隐式耦合 | 每个 Bridge service 显式声明 owner 依赖，运行时拒绝未声明访问 |
+| 防止注册和版本漂移 | 自动测试校验 MCP/Bridge/facade 路由、service 依赖、版本、API feature gate 和当前文档 |
+| 快速验证局部修改 | 默认单元测试可在容器内运行；真实 tmux 基线单独在宿主机和 CI host runner 执行 |
+
+模型修改代码前先看 [AGENTS.md](AGENTS.md)，人和模型都可以从[代码结构与修改入口](docs/development/code-structure.md)定位最小修改范围。完整测试边界见[测试分层](docs/development/testing.md)。
 
 ## 开发与验证
 
