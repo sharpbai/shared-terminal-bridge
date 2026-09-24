@@ -46,6 +46,8 @@ Bridge socket 方法的完整注册表位于 `bridge/protocol/registry.py`。MCP
 
 新增公开工具时，必须同步检查 MCP schema、`mcp_server/tools/registry.py`、Bridge protocol registry、facade descriptor、领域实现和测试。`tests/test_registry_consistency.py` 会检查公开路由是否漂移。
 
+领域 service 通过 `bridge/service.py` 中的 `SERVICE_DEPENDENCIES` 显式声明可访问的 owner 状态和协作方法。运行时 `ServiceContext` 拒绝未声明访问；一致性测试从 service 源码提取实际依赖并要求声明完全匹配。修改 service 依赖时应先判断是否真的属于该领域，再同步更新声明。
+
 ## 目录职责
 
 ```text
@@ -118,6 +120,7 @@ stb_cli/
 - `mcp_server.server` 继续导出 `MinimalMCPServer`、`BridgeClient`、`MCPError` 和 `CodexTurnResolver`。
 - 公开工具名、Bridge method、socket payload 和错误码不能因目录调整而改变。
 - pane ACL、generation、Human Override、长任务审批必须继续由本地 STB 强制执行。
+- 发布版本以 `bridge/config.py` 的 `BRIDGE_VERSION` 和 `BRIDGE_API_VERSION` 为唯一代码来源；`tests/test_version_consistency.py` 校验 MCP metadata 和当前文档。
 
 ## 验证命令
 

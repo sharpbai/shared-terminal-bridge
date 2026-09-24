@@ -1,8 +1,10 @@
 """MCP protocol versions, server metadata, and Bridge feature gates."""
 
+from bridge.config import BRIDGE_VERSION
+
 SERVER_INFO = {
     "name": "shared-terminal-bridge",
-    "version": "0.15.0",
+    "version": BRIDGE_VERSION,
     "description": "Local, human-first tmux observation and leased actions",
 }
 MODERN_VERSION = "2026-07-28"

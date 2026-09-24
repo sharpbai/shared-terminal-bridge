@@ -39,7 +39,7 @@ try:
     from bridge.runtime.human_events import HumanEventService
     from bridge.runtime.socket_server import SocketServerService
     from bridge.runtime.state import StateService
-    from bridge.service import ServiceMethod
+    from bridge.service import ServiceContext, ServiceMethod
     from bridge.sessions.service import SessionService
 except ModuleNotFoundError:  # Direct execution: ./bridge/local_bridge.py
     from tmux.backend import TmuxBackend
@@ -56,7 +56,7 @@ except ModuleNotFoundError:  # Direct execution: ./bridge/local_bridge.py
     from runtime.human_events import HumanEventService
     from runtime.socket_server import SocketServerService
     from runtime.state import StateService
-    from service import ServiceMethod
+    from service import ServiceContext, ServiceMethod
     from sessions.service import SessionService
 
 
@@ -79,7 +79,7 @@ class LocalBridge:
     def _service(self, name):
         cache = self.__dict__.setdefault("_service_cache", {})
         if name not in cache:
-            cache[name] = self._service_types[name](self)
+            cache[name] = self._service_types[name](ServiceContext(self, name))
         return cache[name]
 
     @classmethod

@@ -38,3 +38,7 @@ python3 mcp_server/server.py --help
 ```
 
 涉及 tmux、daemon、binding 或恢复逻辑的改动，还必须在容器外追加真实 tmux 集成测试。
+
+## CI
+
+GitHub Actions 的 `unit` job 在 Python 3.11 和 3.12 上执行容器安全测试、编译和入口检查。`host-tmux` job 运行在独立 Ubuntu 宿主 runner，安装真实 tmux 后执行 `tests/host_tmux/`，不使用 job container。

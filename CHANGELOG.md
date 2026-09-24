@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- 增加 GitHub Actions：Python 3.11/3.12 容器安全测试，以及独立宿主 runner 的真实 tmux 集成测试。
+- 为 Bridge 领域 service 增加显式依赖清单和运行时受限 `ServiceContext`，并以静态一致性测试阻止依赖静默扩张。
+- 统一 Bridge/MCP 版本来源，增加当前文档、CHANGELOG、MCP metadata 和 API feature gate 的版本一致性测试。
+
 ## v0.15.0 — 2026-09-24
 
 - 增加 STB-RDC Exclusive Mode contract。
