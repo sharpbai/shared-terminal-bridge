@@ -2,7 +2,9 @@
 """Focused tests for mcp turn context."""
 
 from tests.mcp_support import *  # noqa: F401,F403
+from unittest import mock
 
+@mock.patch.dict("os.environ", {"CODEX_THREAD_ID": ""})
 class MinimalMCPServerTest(unittest.TestCase):
     def test_turn_resolver_uses_latest_verified_user_message(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -58,7 +60,7 @@ class MinimalMCPServerTest(unittest.TestCase):
                 },
             )
 
-    def test_turn_resolver_binds_process_to_nearest_session_meta(self):
+    def test_turn_resolver_rejects_ambiguous_verified_tasks(self):
         with tempfile.TemporaryDirectory() as directory:
             session_dir = pathlib.Path(directory) / "sessions" / "2026" / "09" / "20"
             session_dir.mkdir(parents=True)
@@ -100,8 +102,40 @@ class MinimalMCPServerTest(unittest.TestCase):
                 codex_root=directory,
                 process_started_at_ms=process_ms,
             )
-            self.assertEqual(resolver.infer_thread_id(), "thread-near")
-            self.assertEqual(resolver.current()["turn_id"], "turn-thread-near")
+            self.assertIsNone(resolver.infer_thread_id())
+            self.assertIsNone(resolver.current())
+
+    def test_initialization_rollout_does_not_claim_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory) / "sessions"
+            root.mkdir()
+            start = "2026-10-07T14:41:33Z"
+            empty = root / "rollout-bootstrap.jsonl"
+            empty.write_text(json.dumps({"type": "session_meta", "payload": {
+                "id": "bootstrap", "timestamp": start,
+            }}) + "\n", encoding="utf-8")
+            resolver = CodexTurnResolver(
+                codex_root=directory,
+                process_started_at_ms=CodexTurnResolver.parse_timestamp_ms(start),
+            )
+            self.assertIsNone(resolver.current())
+            self.assertIsNone(resolver.thread_id)
+            records = [{"type": "session_meta", "payload": {
+                "id": "real-thread", "timestamp": "2026-10-07T14:40:40Z",
+            }}]
+            records.extend({"type": "response_item", "payload": {}}
+                           for _ in range(120))
+            records.append({"type": "event_msg", "payload": {
+                "type": "item_completed", "thread_id": "real-thread",
+                "turn_id": "real-turn", "started_at_ms": 1791384133438,
+                "item": {"type": "UserMessage"},
+            }})
+            (root / "rollout-real-thread.jsonl").write_text(
+                "".join(json.dumps(record) + "\n" for record in records),
+                encoding="utf-8",
+            )
+            self.assertEqual(resolver.current()["turn_id"], "real-turn")
+            self.assertEqual(resolver.thread_id, "real-thread")
 
 
 if __name__ == "__main__":

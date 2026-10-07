@@ -15,7 +15,7 @@ class CodexTurnResolver:
         codex_root=None,
         process_started_at_ms=None,
     ):
-        self.thread_id = thread_id or os.environ.get("CODEX_THREAD_ID")
+        self.thread_id = thread_id or os.environ.get("CODEX_THREAD_ID") or None
         self.codex_root = pathlib.Path(
             codex_root or os.environ.get("CODEX_HOME") or pathlib.Path.home() / ".codex"
         )
@@ -36,19 +36,16 @@ class CodexTurnResolver:
         return int(parsed.timestamp() * 1000)
 
     def infer_thread_id(self):
-        best = None
+        candidates = set()
         sessions_root = self.codex_root / "sessions"
         for path in sessions_root.glob("**/rollout-*.jsonl"):
             session_meta = None
-            discovered_thread = None
             try:
                 lines = path.open("r", encoding="utf-8")
             except OSError:
                 continue
             with lines:
-                for index, line in enumerate(lines):
-                    if index >= 100:
-                        break
+                for line in lines:
                     try:
                         entry = json.loads(line)
                     except json.JSONDecodeError:
@@ -56,31 +53,30 @@ class CodexTurnResolver:
                     payload = entry.get("payload") or {}
                     if entry.get("type") == "session_meta":
                         session_meta = payload
+                        started_at_ms = self.parse_timestamp_ms(payload.get("timestamp"))
+                        if (
+                            started_at_ms is None
+                            or abs(started_at_ms - self.process_started_at_ms) > 60_000
+                        ):
+                            break
                     if entry.get("type") == "event_msg":
-                        if payload.get("thread_id"):
-                            discovered_thread = payload["thread_id"]
                         item = payload.get("item") or {}
                         if (
-                            payload.get("type") == "item_completed"
+                            session_meta
+                            and payload.get("thread_id") == session_meta.get("id")
+                            and payload.get("turn_id")
+                            and isinstance(payload.get("started_at_ms"), int)
+                            and not isinstance(payload.get("started_at_ms"), bool)
+                            and payload.get("type") == "item_completed"
                             and item.get("type") == "UserMessage"
                             and payload.get("thread_id")
                         ):
-                            discovered_thread = payload["thread_id"]
+                            candidates.add(payload["thread_id"])
                             break
-            if not session_meta:
-                continue
-            started_at_ms = self.parse_timestamp_ms(session_meta.get("timestamp"))
-            thread_id = discovered_thread or session_meta.get("id")
-            if started_at_ms is None or not thread_id:
-                continue
-            distance = abs(started_at_ms - self.process_started_at_ms)
-            if distance > 60_000:
-                continue
-            candidate = (distance, started_at_ms, thread_id)
-            if best is None or candidate < best:
-                best = candidate
-        if best is not None:
-            self.thread_id = best[2]
+        # Desktop startup can create an empty rollout next to the real task.
+        # Never bind to it, or choose between concurrent verified tasks by time.
+        if len(candidates) == 1:
+            self.thread_id = candidates.pop()
         return self.thread_id
 
     def current(self):

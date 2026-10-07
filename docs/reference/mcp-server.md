@@ -177,9 +177,13 @@ MCP stdio adapter 并发处理工具请求，并将 Codex 的
 
 重新授权不接受模型传入的时间戳。MCP 进程从 Codex 注入的
 `CODEX_THREAD_ID` 确定当前任务。当前 Codex Desktop 版本不会把该变量继续
-传给项目级 MCP 子进程，因此适配器会在进程启动时，将自身启动时间与 Codex
-session JSONL 的 `session_meta.timestamp` 做最近邻匹配（最大偏差 60 秒），
-绑定一次后不再改变。随后从这个已绑定 thread 的记录中读取最近一条真实
+传给 MCP 子进程，因此适配器会在调用时查找 `session_meta.timestamp` 与
+自身启动时间相差不超过 60 秒、且已记录真实 `UserMessage` 的任务。
+仅存在一个候选任务时绑定；初始化空记录不会参与，多任务有歧义时拒绝授权。
+尚未绑定时后续调用会重新识别，绑定成功后不再改变。该时间窗口仍是兼容性
+推断，不是宿主提供的可信任务绑定；并行或延迟启动无法唯一识别时，需要
+宿主传递正确的 `CODEX_THREAD_ID`，不能放宽窗口或选择最近的活跃任务。
+随后从这个已绑定 thread 的记录中读取最近一条真实
 `UserMessage`，得到：
 
 ```text
