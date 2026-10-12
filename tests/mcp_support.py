@@ -98,6 +98,10 @@ class FakeTurnResolver:
     def __init__(self, turn=1):
         self.turn = turn
 
+    def from_request(self, meta):
+        # Identity validation is covered with real resolver fixtures separately.
+        return self.current()
+
     def current(self):
         return {
             "thread_id": "thread-1",

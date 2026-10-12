@@ -17,6 +17,7 @@ class StdioService:
             raise MCPError(-32600, "Invalid Request")
         method = request["method"]
         params = request.get("params") or {}
+        self.server.identity_diagnostics.record(request)
         if not isinstance(params, dict):
             raise MCPError(-32602, "params must be an object")
         if method == "server/discover":

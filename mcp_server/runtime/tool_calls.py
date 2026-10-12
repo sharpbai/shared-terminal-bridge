@@ -101,7 +101,9 @@ class ToolCallService:
         arguments = params.get("arguments") or {}
         self.server.validate_arguments(tool, arguments)
         if name == "terminal_session_acquire":
-            bridge_response = self.server.acquire_session(arguments["name"])
+            bridge_response = self.server.acquire_session(
+                arguments["name"], request_meta=params.get("_meta") or {}
+            )
         elif name == "terminal_wait_job":
             wait_id = f"wait_{uuid.uuid4().hex[:12]}"
             with self.server.request_lock:
@@ -158,8 +160,11 @@ class ToolCallService:
             result["_meta"] = self.server.response_meta()
         return result
 
-    def acquire_session(self, name):
-        turn = self.server.turn_resolver.current()
+    def acquire_session(self, name, request_meta=None):
+        if request_meta is not None:
+            turn = self.server.turn_resolver.from_request(request_meta)
+        else:
+            turn = self.server.turn_resolver.current()
         if turn is None:
             return {
                 "ok": False,

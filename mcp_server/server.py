@@ -16,6 +16,7 @@ from mcp_server.config import *  # noqa: F403 - compatibility re-exports
 try:
     from mcp_server.transport import BridgeClient, MCPError
     from mcp_server.turn_context import CodexTurnResolver
+    from mcp_server.identity_diagnostics import IdentityDiagnostics
     from mcp_server.runtime.compatibility import CompatibilityService
     from mcp_server.runtime.protocol import ProtocolService
     from mcp_server.runtime.stdio import StdioService
@@ -33,6 +34,7 @@ try:
 except ModuleNotFoundError:  # Direct execution: ./mcp_server/server.py
     from transport import BridgeClient, MCPError
     from turn_context import CodexTurnResolver
+    from identity_diagnostics import IdentityDiagnostics
     from runtime.compatibility import CompatibilityService
     from runtime.protocol import ProtocolService
     from runtime.stdio import StdioService
@@ -92,6 +94,7 @@ class MinimalMCPServer:
         self.enable_actions = enable_actions
         self.acquired_panes = {}
         self.turn_resolver = turn_resolver or CodexTurnResolver()
+        self.identity_diagnostics = IdentityDiagnostics()
         self.legacy_initialized = False
         self.tools = list(OBSERVATION_TOOLS)
         if enable_actions:

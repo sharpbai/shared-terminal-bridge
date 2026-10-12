@@ -84,6 +84,28 @@ python3 bridge/local_bridge.py serve \
 
 stdio 是协议通道；服务器不得向 stdout 打印日志。
 
+### 宿主身份诊断（临时开启）
+
+2026-10-12 的真实恢复会话请求确认：Codex 在工具调用的
+`params._meta.x-codex-turn-metadata` 中提供 `thread_id`、`turn_id` 和
+`turn_started_at_unix_ms`，另有 `params._meta.threadId`。初始化不携带
+这些身份。租约获取优先读取每次请求的宿主元数据，并用本地该会话最新的
+真实用户消息核对 turn ID，使用日志中的用户消息时间。解析不修改连接共享
+身份，避免并发串话；字段缺失、矛盾或过期时拒绝，不退回最近会话猜测。
+工具 arguments 中的身份不参与授权。此信任边界是本地 Codex 宿主及其
+日志，不是面对不可信客户端的密码学身份认证。
+
+设置 MCP 进程环境变量 `STB_MCP_IDENTITY_DIAGNOSTICS=1` 并刷新连接后，
+适配器仅为初始化、发现和 `terminal_session_acquire` 请求记录字段结构。
+文件位于系统临时目录的 `stb-mcp-identity-*/metadata.jsonl`，目录权限 0700、
+文件权限 0600，每连接最多 32 条。只保留已知身份字段中的 UUID；其他值、
+工具参数、消息正文和凭据均不记录。默认关闭，检查后应移除该环境变量。
+
+诊断证据不参与授权。不能因为 `_meta` 中存在一个字段，就直接认定它是
+可信的宿主身份；还需核对其是否与真实调用会话一致、是否由宿主填入，
+以及恢复旧会话和并发调用时的表现。若无可靠来源，采用人工确认的显式
+绑定；禁止以全局最新消息或模型任意指定的 thread ID 代替身份校验。
+
 ## Action 模式
 
 Action 必须在 MCP server 启动时显式开启：
@@ -175,20 +197,21 @@ MCP stdio adapter 并发处理工具请求，并将 Codex 的
 
 ## Codex Turn Identity
 
-重新授权不接受模型传入的时间戳。MCP 进程从 Codex 注入的
-`CODEX_THREAD_ID` 确定当前任务。当前 Codex Desktop 版本不会把该变量继续
-传给 MCP 子进程，因此适配器会在调用时查找 `session_meta.timestamp` 与
-自身启动时间相差不超过 60 秒、且已记录真实 `UserMessage` 的任务。
-仅存在一个候选任务时绑定；初始化空记录不会参与，多任务有歧义时拒绝授权。
-尚未绑定时后续调用会重新识别，绑定成功后不再改变。该时间窗口仍是兼容性
-推断，不是宿主提供的可信任务绑定；并行或延迟启动无法唯一识别时，需要
-宿主传递正确的 `CODEX_THREAD_ID`，不能放宽窗口或选择最近的活跃任务。
-随后从这个已绑定 thread 的记录中读取最近一条真实
-`UserMessage`，得到：
+重新授权不接受模型在工具参数中传入身份或时间戳。2026-10-12 的真实
+Codex 调用通过 `_meta.x-codex-turn-metadata` 提供 thread/turn 身份；
+初始化不提供，`CODEX_THREAD_ID` 环境变量也未传入 MCP 子进程。
+适配器按每次租约请求解析宿主元数据，核对 `threadId` 别名及字段类型，
+再从指定 thread 的日志读取最新真实 `UserMessage`。只有 turn ID 与请求
+一致才授权，并以日志中的用户消息时间生成：
 
 ```text
 (thread_id, turn_id, turn_started_at_ms)
 ```
+
+MCP 租约入口不再使用会话创建时间或全局最近消息来猜测调用归属。
+旧的 resolver 时间推断仅保留供兼容直接调用，不用于 MCP 租约请求。
+请求身份缺失、无真实日志、过期或矛盾时返回 `CODEX_TURN_ID_UNAVAILABLE`；
+不静默降级到时间推断。宿主元数据是本地宿主信任边界，而非密码学认证。
 
 `turn_started_at_ms` 是 Unix 毫秒时间，用于严格单增比较；唯一 `turn_id`
 用于排除同一毫秒碰撞和同一回合重放。Bridge 将该三元组写入 Lease。

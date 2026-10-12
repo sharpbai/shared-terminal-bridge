@@ -5,6 +5,7 @@ import json
 import os
 import pathlib
 import time
+import uuid
 
 class CodexTurnResolver:
     """Resolve the latest real user turn from Codex-owned local records."""
@@ -78,6 +79,42 @@ class CodexTurnResolver:
         if len(candidates) == 1:
             self.thread_id = candidates.pop()
         return self.thread_id
+
+    def from_request(self, meta):
+        """Verify host envelope identity without changing connection state.
+
+        Never accept tool arguments as identity or select the globally newest
+        task. Request-local resolution also avoids concurrent-call cross-talk.
+        """
+        if not isinstance(meta, dict):
+            return None
+        host = meta.get("x-codex-turn-metadata")
+        if not isinstance(host, dict):
+            return None
+        thread_id = host.get("thread_id")
+        turn_id = host.get("turn_id")
+        for value in (thread_id, turn_id):
+            if not isinstance(value, str):
+                return None
+            try:
+                if str(uuid.UUID(value)) != value:
+                    return None
+            except ValueError:
+                return None
+        started = host.get("turn_started_at_unix_ms")
+        if not isinstance(started, int) or isinstance(started, bool) or started <= 0:
+            return None
+        if meta.get("threadId", thread_id) != thread_id:
+            return None
+        # Read only this thread's latest genuine user turn. A stale request
+        # cannot borrow the authorization of a newer message.
+        verified = CodexTurnResolver(
+            thread_id=thread_id, codex_root=self.codex_root
+        ).current()
+        if verified is None or verified["turn_id"] != turn_id:
+            return None
+        # Use the user event's recorded time, not a model parameter or a guess.
+        return verified
 
     def current(self):
         if not self.thread_id and not self.infer_thread_id():
