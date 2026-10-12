@@ -1,11 +1,19 @@
 # Changelog
 
-## Unreleased
+## v0.15.1 — 2026-10-12
+
+- 修复恢复旧 Codex 会话后 `CODEX_TURN_ID_UNAVAILABLE`：按每次 MCP 请求的宿主 `x-codex-turn-metadata` 解析 thread/turn 身份，与本地真实用户回合核对，不再用会话创建时间猜测租约归属。
+- 请求身份缺失、矛盾或过期时拒绝授权；模型工具参数不能指定身份。保留 Human Override、generation 和长任务批准边界。
+- 增加默认关闭的脱敏身份诊断及回归测试；真实恢复会话已由人工验证能够获取租约。
+- 按职责重组 Bridge、MCP、CLI、测试和文档，提供小入口导航，降低人和 Agent 的局部维护成本。
+- 相关项目导航加入独立 Tools 仓库。
 
 - 增加 GitHub Actions：Python 3.11/3.12 容器安全测试，以及独立宿主 runner 的真实 tmux 集成测试。
 - 为 Bridge 领域 service 增加显式依赖清单和运行时受限 `ServiceContext`，并以静态一致性测试阻止依赖静默扩张。
 - 统一 Bridge/MCP 版本来源，增加当前文档、CHANGELOG、MCP metadata 和 API feature gate 的版本一致性测试。
 - 修复 Linux tmux 初始托管 pane 未继承 10 万行历史上限的问题：在同一命令队列中先设置全局选项，再创建 session。
+
+Bridge API 保持 v9。升级后需重新连接 MCP（或重启 Codex 应用）以加载身份解析修复；无需重建托管 tmux 会话。宿主元数据的信任范围是本地 Codex 及其日志，不是面对不可信客户端的密码学认证。
 
 ## v0.15.0 — 2026-09-24
 

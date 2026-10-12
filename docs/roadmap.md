@@ -6,7 +6,8 @@
 
 ## 当前基线
 
-- STB v0.15.0 已固定 Observation、Execution Lease、generation、Human Override、Job/Wait、Task Block 和本地审计语义。
+- STB v0.15.1 已固定 Observation、Execution Lease、generation、Human Override、Job/Wait、Task Block 和本地审计语义。
+- Codex 恢复旧会话的租约身份已改用请求级宿主元数据核对真实用户回合；缺失或冲突时拒绝，不以最近活跃会话猜测。
 - Codex 通过本地 MCP 使用 STB；ChatGPT 通过 RDC transport 与 STB-RDC Adapter 使用同一安全状态机。
 - STB-RDC Exclusive Mode 当前由工具说明和 Adapter contract 实现 fail-closed；宿主级能力隔离仍待实现。
 

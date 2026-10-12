@@ -1,6 +1,6 @@
 # STB-RDC Exclusive Mode
 
-> 发布状态：STB v0.15.0 / Bridge API v9 · 2026-09-24
+> 当前版本：STB v0.15.1 / Bridge API v9 · 2026-10-12（contract 自 v0.15.0 引入）
 
 ## 问题
 

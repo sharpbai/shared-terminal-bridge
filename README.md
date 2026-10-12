@@ -14,8 +14,11 @@ Shared Terminal Bridge（STB）是一个本地优先的交互式终端桥接层�
 
 ## 当前版本
 
-当前稳定版本为 **v0.15.0 / Bridge API v9**。本版增加 STB-RDC Exclusive Mode
-contract：用户明确选择 STB-RDC 后，RDC 只承担 transport/bootstrap，目标主机操作
+当前稳定版本为 **v0.15.1 / Bridge API v9**。本版修复旧 Codex 会话恢复后的租约
+身份解析，改为核对每次请求的宿主 thread/turn 元数据，同时收录职责拆分与维护
+边界检查。升级后请重新连接 MCP 或重启 Codex 应用，无需重建 tmux 会话。
+
+继续保留 STB-RDC Exclusive Mode contract：用户明确选择 STB-RDC 后，RDC 只承担 transport/bootstrap，目标主机操作
 默认必须经过 STB；独立 RDC capability 需要一次性人工旁路批准。该 contract 让当前
 客户端 fail closed，但完整的宿主级物理隔离仍需 RDC/宿主支持 capability filtering。
 详见 [STB-RDC Exclusive Mode](docs/reference/stb-rdc-exclusive-mode.md)和
