@@ -3,6 +3,7 @@
 import hashlib
 import re
 import uuid
+from bridge.runtime.admission import current_request, received_after_revocation
 
 try:
     from bridge.common import BridgeError, now, unix_ms
@@ -52,6 +53,24 @@ class AuthorityService:
                 )
             return dict(lease)
 
+    def prepare_command_lease(self, pane, generation):
+        """Renew only a new top-level call, never an old block's next step."""
+        self.bridge.authorize(pane)
+        with self.bridge.lock:
+            lease = self.bridge.leases.get(pane)
+            if (lease and lease['state'] == 'REVOKED'
+                    and lease['generation'] == generation
+                    and received_after_revocation(lease)):
+                authorization = dict(lease.get('authorization') or {})
+                renewed = self.acquire_execution(pane, **authorization)
+                self.bridge.record('LEASE_AUTO_RENEW', pane=pane,
+                                   previous_generation=generation,
+                                   generation=renewed['generation'],
+                                   received=current_request().as_dict())
+                return renewed['generation']
+            self.bridge.require_lease(pane, generation)
+            return generation
+
     def acquire_execution(
         self,
         pane: str,
@@ -92,7 +111,8 @@ class AuthorityService:
                         pane=pane,
                         generation=previous.get("generation"),
                     )
-            if previous and previous.get("state") == "REVOKED" and thread_id:
+            if (previous and previous.get("state") == "REVOKED" and thread_id
+                    and not received_after_revocation(previous)):
                 previous_auth = previous.get("authorization") or {}
                 revoked_at_ms = previous.get("revoked_at_ms")
                 if (

@@ -46,6 +46,7 @@ class StateService:
             "managed_sessions": self.bridge.managed_sessions,
             "long_run_requests": self.bridge.long_run_requests,
             "jobs": self.bridge.jobs,
+            "command_requests": self.bridge.command_requests,
             "binding": {
                 "snapshot_taken": self.bridge.binding_snapshot_taken,
                 "installed": self.bridge.human_binding_installed,
@@ -107,6 +108,7 @@ class StateService:
         self.bridge.managed_sessions = state.get("managed_sessions", {})
         self.bridge.long_run_requests = state.get("long_run_requests", {})
         self.bridge.jobs = state.get("jobs", {})
+        self.bridge.command_requests = state.get("command_requests", {})
         for job in self.bridge.jobs.values():
             # v0.9 inferred arbitrary percentages (for example df usage) as
             # progress. Progress is now unknown unless a command-specific

@@ -4,6 +4,37 @@
 from tests.context_support import *  # noqa: F401,F403
 
 class ContextBridgeTest(unittest.TestCase):
+    def test_changed_directory_and_branch_prompt_completes(self):
+        bridge = bridge_fixture()
+        bridge.tmux.content = "old history\nSharpbaiPro:Downloads # "
+        submitted = bridge.terminal_submit("%0", 1, "cd /project", 1000, "normal")
+        bridge.tmux.content = "old history\nSharpbaiPro:Downloads # cd /project\nSharpbaiPro:IT网管 (master*) # "
+        bridge._refresh_job(submitted["job_id"])
+        bridge.jobs[submitted["job_id"]]["last_change_ms"] = unix_ms() - 2000
+        result = bridge.terminal_wait_job(submitted["job_id"], wait_ms=1)
+        self.assertEqual(result["state"], "COMPLETED")
+        self.assertNotIn("old history", result["output_excerpt"]["content"])
+
+    def test_prompt_like_output_with_active_process_does_not_complete(self):
+        bridge = bridge_fixture()
+        bridge.tmux.content = "SharpbaiPro:Downloads # "
+        submitted = bridge.terminal_submit("%0", 1, "sleep 10", 1000, "normal")
+        bridge.tmux.current_command = "sleep"
+        bridge.tmux.content = "SharpbaiPro:Downloads # sleep 10\nSharpbaiPro:project # "
+        bridge._refresh_job(submitted["job_id"])
+        bridge.jobs[submitted["job_id"]]["last_change_ms"] = unix_ms() - 2000
+        self.assertEqual(bridge.terminal_job_status(submitted["job_id"])["state"], "RUNNING")
+
+    def test_bare_suffix_or_other_host_is_not_prompt_completion(self):
+        for line in ("result #", "other:project #", "SharpbaiPro:project $"):
+            bridge = bridge_fixture()
+            bridge.tmux.content = "SharpbaiPro:Downloads # "
+            submitted = bridge.terminal_submit("%0", 1, "work", 1000, "normal")
+            bridge.tmux.content += "work\n" + line
+            bridge._refresh_job(submitted["job_id"])
+            bridge.jobs[submitted["job_id"]]["last_change_ms"] = unix_ms() - 2000
+            self.assertEqual(bridge.terminal_job_status(submitted["job_id"])["state"], "RUNNING")
+
     def test_submit_creates_job_and_prompt_return_completes_it(self):
         bridge = bridge_fixture()
         submitted = bridge.terminal_submit("%0", 1, "sleep 1", 60_000, "normal")

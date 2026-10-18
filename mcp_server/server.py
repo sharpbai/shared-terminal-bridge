@@ -123,7 +123,7 @@ def parse_args():
     parser.add_argument(
         "--enable-actions",
         action="store_true",
-        help="register leased action tools; lease acquisition stays out-of-band",
+        help="register model task tools; Core handles execution authority internally",
     )
     parser.add_argument(
         "--enable-session-management",

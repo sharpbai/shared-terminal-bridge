@@ -322,20 +322,24 @@ class TmuxBackend:
                 shlex.quote("#{client_name}"),
                 "--session",
                 shlex.quote("#{session_name}"),
+                "--tmux-socket", shlex.quote(self.socket_name),
+                "--snapshot-buffer", shlex.quote("stb-interrupt-#{pane_id}"),
             ]
         )
-        self.run(
-            "bind-key",
-            "-T",
-            "root",
-            "C-c",
-            "send-keys",
-            "C-c",
-            r"\;",
-            "run-shell",
-            "-b",
-            emit_command,
+        # Expand the pane-specific buffer name before parsing the command list.
+        # The synchronous emitter consumes the snapshot before another key from
+        # this client runs; C-c itself is delivered before launching Python.
+        fallback = (
+            "capture-pane -S -30 -b stb-interrupt-#{pane_id} ; "
+            "send-keys C-c ; run-shell " + shlex.quote(emit_command)
         )
+        ordered = (
+            'display-message -l -c "#{@stb_event_client}" '
+            '"STB_INTERRUPT #{pane_id} #{client_name}" ; send-keys C-c'
+        )
+        commands = ('if-shell -F "#{@stb_event_client}" '
+                    + shlex.quote(ordered) + ' ' + shlex.quote(fallback))
+        self.run("bind-key", "-T", "root", "C-c", "run-shell", "-C", commands)
 
     def ensure_server_identity(self):
         variable = "SHARED_TERMINAL_BRIDGE_SERVER_ID"

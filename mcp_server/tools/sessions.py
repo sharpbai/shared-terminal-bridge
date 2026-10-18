@@ -11,10 +11,10 @@ TOOLS = [
                 "when new terminal input is required. Reading history/state never "
                 "requires this tool. A new Codex task must acquire its own "
                 "generation before its first "
-                "write. After a human Ctrl+C, do not call this tool again in the "
-                "same user turn: read once and return immediately. It may be called "
-                "again only after the user sends a later message requesting more "
-                "terminal work."
+                "write. Acquiring an active same-turn lease is idempotent. "
+                "A new local call after human Ctrl+C may reacquire without asking "
+                "the user again; command calls can also renew automatically. "
+                "Interrupted queued steps are never resumed inside their old call."
             ),
             "inputSchema": object_schema(
                 {"name": {"type": "string", "minLength": 1}},

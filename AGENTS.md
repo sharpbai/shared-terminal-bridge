@@ -6,7 +6,7 @@
 2. 查 MCP 工具，先看 `mcp_server/tools/registry.py`，再按注册项打开对应 schema 和 Bridge 实现。
 3. 只知道行为、不知道工具名时，先看 `docs/development/code-structure.md`。
 4. 不要一开始读取整个 `poc/`、完整路线图或全部测试；先打开对应功能域和测试。
-5. 保持工具名、socket payload、错误码、Pane ACL、generation、Human Override 和长任务批准语义兼容。
+5. 模型接口采用 run/job ID，不保留旧 acquire/submit/generation 契约；Core 内部 Pane ACL、授权计数、Human Override、请求去重和风险批准仍须严格校验。
 
 ## 代码风格
 

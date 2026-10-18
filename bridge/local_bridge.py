@@ -12,6 +12,8 @@ import threading
 if __package__ in (None, ""):  # Direct execution: ./bridge/local_bridge.py
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+from bridge.runtime.admission import current_request, request_scope
+
 try:
     from bridge.common import BridgeError, now, unix_ms
 except ModuleNotFoundError:  # Direct execution: ./bridge/local_bridge.py
@@ -32,11 +34,14 @@ try:
     from bridge.execution.long_run import LongRunService
     from bridge.execution.read_only_policy import ReadOnlyPolicy
     from bridge.execution.submit import SubmitService
+    from bridge.execution.run import RunService
+    from bridge.execution.job_actions import JobActionService
     from bridge.execution.task_blocks import TaskBlockService
     from bridge.observation.service import ObservationService
     from bridge.protocol.registry import resolve_handler
     from bridge.runtime.audit import AuditService
     from bridge.runtime.human_events import HumanEventService
+    from bridge.runtime.terminal_events import TerminalEventService
     from bridge.runtime.socket_server import SocketServerService
     from bridge.runtime.state import StateService
     from bridge.service import ServiceContext, ServiceMethod
@@ -49,11 +54,14 @@ except ModuleNotFoundError:  # Direct execution: ./bridge/local_bridge.py
     from execution.long_run import LongRunService
     from execution.read_only_policy import ReadOnlyPolicy
     from execution.submit import SubmitService
+    from execution.run import RunService
+    from execution.job_actions import JobActionService
     from execution.task_blocks import TaskBlockService
     from observation.service import ObservationService
     from protocol.registry import resolve_handler
     from runtime.audit import AuditService
     from runtime.human_events import HumanEventService
+    from runtime.terminal_events import TerminalEventService
     from runtime.socket_server import SocketServerService
     from runtime.state import StateService
     from service import ServiceContext, ServiceMethod
@@ -65,6 +73,7 @@ class LocalBridge:
         "state": StateService,
         "audit": AuditService,
         "human_events": HumanEventService,
+        "terminal_events": TerminalEventService,
         "socket_server": SocketServerService,
         "sessions": SessionService,
         "observation": ObservationService,
@@ -73,6 +82,8 @@ class LocalBridge:
         "jobs": JobService,
         "job_wait": JobWaitService,
         "submit": SubmitService,
+        "run": RunService,
+        "job_actions": JobActionService,
         "task_blocks": TaskBlockService,
     }
 
@@ -101,6 +112,9 @@ class LocalBridge:
 
     # bridge/runtime/human_events.py
     handle_human_event = ServiceMethod("human_events")
+    ensure_terminal_stream = ServiceMethod("terminal_events")
+    handle_terminal_event = ServiceMethod("terminal_events")
+    close_terminal_streams = ServiceMethod("terminal_events")
 
     # bridge/runtime/socket_server.py
     prepare_socket = ServiceMethod("socket_server")
@@ -137,6 +151,7 @@ class LocalBridge:
     # bridge/execution/authority.py
     authorize = ServiceMethod("authority")
     require_lease = ServiceMethod("authority")
+    prepare_command_lease = ServiceMethod("authority")
     acquire_execution = ServiceMethod("authority")
     release_execution = ServiceMethod("authority")
     execution_status = ServiceMethod("authority")
@@ -173,6 +188,14 @@ class LocalBridge:
     # bridge/execution/submit.py
     _command_completeness = ServiceMethod("submit")
     terminal_submit = ServiceMethod("submit")
+    terminal_run = ServiceMethod("run")
+    terminal_input_job = ServiceMethod("job_actions")
+    terminal_approve_request = ServiceMethod("job_actions")
+    terminal_interrupt_job = ServiceMethod("run")
+
+    def _submit_once(self, params, execute):
+        from bridge.runtime.command_requests import submit_once
+        return submit_once(self, params, execute)
 
     # bridge/execution/task_blocks.py
     terminal_task_block = ServiceMethod("task_blocks")
@@ -217,6 +240,7 @@ class LocalBridge:
         self.long_run_requests = {}
         self.long_run_approvals = {}
         self.jobs = {}
+        self.command_requests = {}
         self.wait_handles = {}
         self.cancelled_wait_ids = set()
         self.interrupt_sources = {}
@@ -228,10 +252,27 @@ class LocalBridge:
 
 
     def dispatch(self, method: str, params):
+        if current_request() is None:
+            with request_scope():
+                return self.dispatch(method, params)
+        if method == 'terminal_submit' and 'request_id' in params:
+            from bridge.runtime.command_requests import submit_once
+            arguments = dict(params)
+            arguments.pop('request_id')
+            return submit_once(self, params, lambda: self.dispatch(method, arguments))
         handler = resolve_handler(self, method)
         if handler is None:
             raise BridgeError("METHOD_NOT_FOUND", method=method)
-        return handler(**params)
+        command_methods = {'terminal_submit', 'terminal_type', 'terminal_key',
+                           'terminal_task_block_execute'}
+        effective_generation = None
+        if method in command_methods and 'pane' in params and 'generation' in params:
+            effective_generation = self.prepare_command_lease(params['pane'], params['generation'])
+            params = dict(params, generation=effective_generation)
+        result = handler(**params)
+        if effective_generation is not None and isinstance(result, dict):
+            result['generation'] = effective_generation
+        return result
 
 
 def request(socket_path: pathlib.Path, method: str, params):
@@ -258,6 +299,15 @@ def emit_event(args):
         "session": args.session,
         "timestamp": now(),
     }
+    if getattr(args, "snapshot_buffer", None):
+        backend = TmuxBackend(args.tmux_socket)
+        try:
+            snapshot = backend.run("show-buffer", "-b", args.snapshot_buffer)
+            event["pre_interrupt_content"] = snapshot.stdout[-16000:]
+        except BridgeError:
+            pass
+        finally:
+            backend.run("delete-buffer", "-b", args.snapshot_buffer, check=False)
     producer = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     try:
         producer.sendto(
@@ -318,6 +368,8 @@ def parse_args():
     emit_parser.add_argument("--pane", required=True)
     emit_parser.add_argument("--client", default="")
     emit_parser.add_argument("--session", default="")
+    emit_parser.add_argument("--tmux-socket")
+    emit_parser.add_argument("--snapshot-buffer")
     return parser.parse_args()
 
 

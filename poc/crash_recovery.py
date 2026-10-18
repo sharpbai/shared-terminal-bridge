@@ -133,11 +133,10 @@ def main() -> int:
         recovered = call("execution_status", {"pane": pane})
         binding_status = call("human_binding_status")
         stale = call(
-            "terminal_type",
+            "terminal_interrupt",
             {
                 "pane": pane,
                 "generation": generation_1,
-                "text": "SHOULD_NOT_RUN_AFTER_CRASH",
             },
         )
         restored = call("restore_human_binding")

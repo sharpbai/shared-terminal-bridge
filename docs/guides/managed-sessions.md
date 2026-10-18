@@ -149,3 +149,9 @@ python3 -m unittest tests/test_stb_cli.py
 
 端到端测试已覆盖 MCP create、动态 ACL、`stb list/info/panes/lease/release/stop`、
 普通 session 防误删和审计链。
+
+## CLI 自发现与 MCP 接入
+
+`stb discover --json` 返回离线能力导航、MCP stdio 启动参数、全局注册命令与安全规则。`stb mcp` 显示中文接入说明，亦支持 `--json`。它们不连接 daemon、不修改客户端配置、不申请授权或执行终端任务。
+
+注册命令使用当前 Python 和仓库的绝对路径，保留 `--bridge-socket` 全局参数。已有同名 MCP 时先核对配置，不覆盖定制参数。长等待需在全局配置对应 server 段设置 `tool_timeout_sec = 660`；注册后重连 MCP 或新建任务。日常操作按运行中的 MCP instructions 与 schema，无需读取 skill。

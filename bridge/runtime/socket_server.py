@@ -7,6 +7,7 @@ import socket
 import threading
 
 from bridge.common import BridgeError
+from bridge.runtime.admission import receive, request_scope
 
 class SocketServerService:
     def __init__(self, bridge):
@@ -31,10 +32,12 @@ class SocketServerService:
             except OSError:
                 break
             try:
+                receipt = receive()
                 event = json.loads(payload)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 self.bridge.record("EVENT_REJECT", reason="INVALID_JSON")
                 continue
+            event['_received'] = receipt
             self.bridge.handle_human_event(event)
 
     def handle_connection(self, connection):
@@ -42,12 +45,14 @@ class SocketServerService:
             reader = connection.makefile("r", encoding="utf-8")
             writer = connection.makefile("w", encoding="utf-8")
             line = reader.readline()
+            receipt = receive()
             try:
                 request = json.loads(line)
-                result = self.bridge.dispatch(
-                    request.get("method", ""),
-                    request.get("params") or {},
-                )
+                with request_scope(receipt):
+                    result = self.bridge.dispatch(
+                        request.get("method", ""),
+                        request.get("params") or {},
+                    )
                 response = {"ok": True, "result": result}
             except BridgeError as error:
                 response = error.response()
@@ -96,6 +101,7 @@ class SocketServerService:
             ).start()
 
         self.bridge.stop_event.set()
+        self.bridge.close_terminal_streams()
         listener.close()
         if self.bridge.event_listener:
             self.bridge.event_listener.close()

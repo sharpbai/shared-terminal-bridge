@@ -5,7 +5,7 @@ from bridge.config import BRIDGE_VERSION
 SERVER_INFO = {
     "name": "shared-terminal-bridge",
     "version": BRIDGE_VERSION,
-    "description": "Local, human-first tmux observation and leased actions",
+    "description": "Self-discovering shared tmux terminal: observe, run, and job interactions",
 }
 MODERN_VERSION = "2026-07-28"
 LEGACY_VERSION = "2025-11-25"

@@ -59,9 +59,24 @@ Agent
   → pane
 ```
 
-真人 `Ctrl+C` 命中 root key binding。binding 首先把 `C-c` 原样送入当前
-pane，然后异步发布事件。Agent 的 `send-keys` 直接写入 pane，不经过 client
-key table，所以不会产生 Human 事件。
+真人 `Ctrl+C` 命中 root key binding。对已建立有序通道的 pane，binding 先向
+对应 control client 发布 `%message STB_INTERRUPT`，随后将 `C-c` 原样送入
+pane。输出通知和按键通知在同一 control-mode 连接内有序交付；Bridge 根据
+通知之前的任务状态决定是否撤权，不读取按键后的画面来猜测按键前状态。
+Agent 的 `send-keys` 直接写入 pane，不经过 client key table，所以不会产生
+Human 事件。只有同代 STB 命令处于执行阶段时才撤权，空闲 lease 不受影响。
+
+撤权取消当次执行链，不再要求结束整个模型回合。本地晚于中断接收的新调用可
+自动取得新 generation；旧调用内部步骤不能恢复。接收序号由
+`bridge/runtime/admission.py` 产生，不由模型参数提供；详见下方 MCP 执行语义。
+
+实现入口是 `bridge/tmux/control_stream.py`（传输/顺序）和
+`bridge/runtime/terminal_events.py`（状态转换），详细约束见
+[MCP 执行语义](mcp-server.md)。control client 使用 `ignore-size`，不调整人的
+终端宽度；它会计入 tmux 的 attached client 数量。完成识别依然基于提示符规则，
+不是远端退出码或 Shell hook；未注入脚本、marker 或目标环境配置。
+
+没有有序通道的旧任务保留本地事件 socket 与按键前快照兼容路径。
 
 这里识别的严格含义是“来自 tmux client 的输入”和“通过 Bridge 注入的输入”。
 它不是操作系统级的人员身份认证。

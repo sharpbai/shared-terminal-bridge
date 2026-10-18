@@ -8,7 +8,7 @@ TOOLS = [
             "title": "Request user approval for one long command",
             "description": (
                 "Create a non-executing approval request before a command expected "
-                "over 120 seconds or marked high_io/full_scan. This returns "
+                "marked high_io/full_scan; duration alone is not a risk gate. This returns "
                 "input_required with a request ID and the exact command. Show the "
                 "full command, duration, resource impact, and budgets to the user, "
                 "then end the turn. A later explicit approval message may approve "

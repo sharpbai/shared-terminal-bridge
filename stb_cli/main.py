@@ -9,9 +9,11 @@ from stb_cli.commands_admin import handle_admin_command
 from stb_cli.commands_execution import handle_execution_command
 from stb_cli.commands_sessions import enter_session, handle_session_command
 from stb_cli.parser import parser
+from stb_cli.discovery import handle_discovery_command
 
 
 COMMAND_HANDLERS = (
+    handle_discovery_command,
     handle_session_command,
     handle_execution_command,
     handle_admin_command,
@@ -19,7 +21,11 @@ COMMAND_HANDLERS = (
 
 
 def main():
-    args = parser().parse_args()
+    command_parser = parser()
+    if len(sys.argv) == 1:
+        command_parser.print_help()
+        return 0
+    args = command_parser.parse_args()
     try:
         for handler in COMMAND_HANDLERS:
             result = handler(args)

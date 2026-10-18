@@ -14,9 +14,9 @@ Shared Terminal Bridge（STB）是一个本地优先的交互式终端桥接层�
 
 ## 当前版本
 
-当前稳定版本为 **v0.15.1 / Bridge API v9**。本版修复旧 Codex 会话恢复后的租约
-身份解析，改为核对每次请求的宿主 thread/turn 元数据，同时收录职责拆分与维护
-边界检查。升级后请重新连接 MCP 或重启 Codex 应用，无需重建 tmux 会话。
+首次接入可运行 `stb discover --json` 获取机器可读导航，或 `stb mcp` 查看 MCP 全局注册命令与等待超时配置；两者无需 daemon 在线，不修改配置或执行任务。连接后以 MCP instructions/schema 为准，无需 skill。
+
+当前稳定版本为 **v0.16.0 / Bridge API v9**。模型接口统一为 run/job ID，内部处理授权与持久请求去重；终端输出和人工中断纳入有序状态机。增加 MCP/CLI 自发现，不再依赖 skill。旧 acquire/submit/generation 模型契约不兼容；配套 STB-RDC v0.3.0。升级后重启 Bridge 并重新连接 MCP，无需重建 tmux 会话；重启会撤销旧授权。
 
 继续保留 STB-RDC Exclusive Mode contract：用户明确选择 STB-RDC 后，RDC 只承担 transport/bootstrap，目标主机操作
 默认必须经过 STB；独立 RDC capability 需要一次性人工旁路批准。该 contract 让当前
@@ -31,7 +31,7 @@ Codex 和 ChatGPT 已经很适合用会话组织开发、研究、方案设计�
 - 操作发生在 SSH、Shell、PowerShell 或交互式程序里，状态持续存在，不能靠每轮复制粘贴重建。
 - 人和 AI 需要看到同一份屏幕历史，而不是各自维护一个容易分叉的终端。
 - AI 必须能执行命令，但“可以写入”不能等于“此后一直有权写入”。
-- 人按下 `Ctrl+C` 通常表示接管或改变意图，不能被模型理解为普通失败后自动重试。
+- STB 命令执行期间，人工 `Ctrl+C` 取消当次执行链；空闲操作不撤权。Bridge 此后新收到的调用可自动换代授权，无须普通人工续授权；高风险操作仍单独批准。
 - 已经做出的模型决策可能在等待后过期，旧操作不能越过人的中断继续落到终端。
 - 长任务不应靠模型频繁轮询；完整 scrollback、重复状态和 TUI 画面也不应持续消耗上下文。
 - 远程能力需要可扩展：今天是本机 tmux 和 SSH，未来可以是远程 PowerShell 或其他操作通道。
@@ -44,7 +44,7 @@ STB 的目标，是在“有上下文的 Agent 环境”和“真实操作界面
 | --- | --- |
 | 人和 AI 使用不同 Shell，状态不一致 | tmux pane 是双方共享的事实来源 |
 | 只想查看历史，却被迫申请写权限 | Observation 与 Action 分离，只读无需 lease |
-| 人中断后 AI 仍继续旧计划 | `Ctrl+C` 触发 Human Override，立即撤销当前 generation |
+| 人中断后 AI 仍继续旧计划 | 执行期间的人工 `Ctrl+C` 触发 Human Override，撤销当前 generation |
 | 旧请求或并发任务晚到 | 每次写入都校验 pane、lease 和 generation |
 | 长任务靠模型反复询问 | Bridge 本地维护 job/wait，变化时返回有界增量 |
 | 终端噪声挤占模型上下文 | Read Delta、AI Context Policy 和 Task Block 控制输入预算 |
@@ -68,7 +68,7 @@ flowchart LR
 
 1. **观察通道**：通过 `capture-pane` 和 cursor delta 读取受 ACL 约束的上下文，不要求写入租约。
 2. **Agent 输入通道**：通过 Bridge 将可见命令送入 pane；每次操作都校验 execution lease。
-3. **Human 控制通道**：tmux client 的真实 `Ctrl+C` 产生 Human Override；Agent 注入的 `C-c` 不会被误判成人工输入。
+3. **Human 控制通道**：STB 命令执行期间，tmux client 的真实 `Ctrl+C` 产生 Human Override；空闲按键和 Agent 注入的 `C-c` 不会被误判成人工撤权。命令开始、输出与按键通过同一有序连接交付状态机。
 
 关键语义是：
 
@@ -126,6 +126,8 @@ cd shared-terminal-bridge
 
 STB 的 MCP server 是 Bridge Unix socket 的 stdio 适配层。它不直接操作 tmux，因此 Pane ACL、lease、generation、Human Override 和审计仍由 Bridge 统一强制。
 
+Codex 直接按 MCP 自发现的 instructions 和工具 schema 使用，不需要 STB skill 或事先阅读仓库文档。观察、run、job 交互与风险审批规则由运行中的 MCP 服务提供。
+
 ```json
 {
   "command": "python3",
@@ -139,7 +141,7 @@ STB 的 MCP server 是 Bridge Unix socket 的 stdio 适配层。它不直接操�
 }
 ```
 
-默认 MCP 只提供 Observation；只有显式启用 actions 后才注册写入工具。创建会话不等于取得执行权限，模型在首次写入前仍需为当前任务和用户回合取得新的 generation。
+默认 MCP 只提供 Observation；只有显式启用 actions 后才注册任务工具。模型用 `terminal_run` 执行，交互与中断使用 job ID；授权与内部计数由 Core 管理，不再先申请租约。旧模型接口不兼容，升级后重连 MCP。见[当前模型契约](docs/reference/model-tasks.md)。
 
 详细工具、Codex Turn Identity、长任务批准和取消语义见[最小 MCP Server](docs/reference/mcp-server.md)。
 

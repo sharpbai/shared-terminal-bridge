@@ -9,8 +9,12 @@
 
 ## 原理与接口
 
+- [当前模型任务接口（不管理授权计数）](reference/model-tasks.md)
+
 - [高层架构](reference/architecture.md)
 - [MCP Server 与工具语义](reference/mcp-server.md)
+- [无额外 Shell 的命令传输与重试](reference/command-transport.md)
+- [Run：合并授权、提交和等待](reference/terminal-run.md)
 - [AI Context Policy 与 Terminal Task Block](reference/ai-context-policy.md)
 - [STB-RDC Exclusive Mode](reference/stb-rdc-exclusive-mode.md)
 
@@ -18,6 +22,7 @@
 
 - [代码结构与修改入口](development/code-structure.md)
 - [测试分层与运行环境](development/testing.md)
+- [不中断 SSH Shell 与 tmux 历史查看：方案调研](development/persistent-shell-and-history.md)
 - [验证与回归索引](validation/README.md)
 - [当前路线图](roadmap.md)
 

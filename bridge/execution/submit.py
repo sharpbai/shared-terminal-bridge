@@ -4,6 +4,7 @@ import shlex
 import uuid
 
 from bridge.common import BridgeError, now, unix_ms
+from bridge.execution.lifecycle import EXECUTING, execution_phase
 from bridge.config import (
     DEFAULT_IDLE_BUDGET_MS,
     DEFAULT_TOTAL_BUDGET_MS,
@@ -25,6 +26,8 @@ class SubmitService:
             return "nul_byte"
         if "\n" in text or "\r" in text:
             return "multiline_not_supported"
+        if any(ord(character) < 32 or ord(character) == 127 for character in text):
+            return "control_character_not_supported"
         if text.rstrip().endswith("\\"):
             return "trailing_continuation"
         try:
@@ -56,10 +59,7 @@ class SubmitService:
             raise BridgeError("INVALID_EXPECTED_DURATION") from error
         if resource_class not in {"normal", "high_io", "full_scan"}:
             raise BridgeError("INVALID_RESOURCE_CLASS", resource_class=resource_class)
-        requires_approval = (
-            expected_duration_ms > LONG_RUN_APPROVAL_MS
-            or resource_class in HIGH_RESOURCE_CLASSES
-        )
+        requires_approval = resource_class in HIGH_RESOURCE_CLASSES
         if requires_approval:
             with self.bridge.lock:
                 approval = self.bridge.long_run_approvals.get(long_run_approval_id)
@@ -105,6 +105,7 @@ class SubmitService:
                         "请向用户展示完整命令和资源影响；收到后续明确批准消息前不要执行。"
                     ),
                 )
+        stream = self.bridge.ensure_terminal_stream(pane)
         baseline = self.bridge.tmux.read(pane, JOB_CAPTURE_LINES)
         try:
             baseline_pane_command = (
@@ -113,15 +114,35 @@ class SubmitService:
             )
         except BridgeError:
             baseline_pane_command = None
-        if hasattr(self.bridge.tmux, "submit"):
-            self.bridge.tmux.submit(pane, text)
-        else:  # Minimal test doubles and third-party backends.
-            self.bridge.tmux.send_text(pane, text)
-            self.bridge.tmux.send_key(pane, "Enter")
-        job = self.bridge._create_job(
-            pane, generation, text, expected_duration_ms, resource_class, baseline,
-            baseline_pane_command,
-        )
+        # Publish the task before Enter can run it. Event handling shares this
+        # lock, so there is no submitted-but-untracked interrupt window.
+        with self.bridge.lock:
+            self.bridge.require_lease(pane, generation)
+            if stream is not None:
+                active = next((existing for existing in self.bridge.jobs.values()
+                               if existing['pane'] == pane
+                               and execution_phase(existing) == EXECUTING), None)
+                if active:
+                    raise BridgeError('TERMINAL_JOB_ALREADY_RUNNING', pane=pane,
+                                      job_id=active['job_id'])
+            job = self.bridge._create_job(
+                pane, generation, text, expected_duration_ms, resource_class, baseline,
+                baseline_pane_command,
+            )
+            if stream is not None:
+                job['event_stream_pending'] = True
+            try:
+                if stream is not None:
+                    stream.submit(job['job_id'], generation, text)
+                elif hasattr(self.bridge.tmux, "submit"):
+                    self.bridge.tmux.submit(pane, text)
+                else:  # Minimal test doubles and third-party backends.
+                    self.bridge.tmux.send_text(pane, text)
+                    self.bridge.tmux.send_key(pane, "Enter")
+            except Exception:
+                job.update(state="FAILED", execution_phase="FINISHED")
+                self.bridge.persist_state()
+                raise
         byte_count = len(text.encode())
         self.bridge.record(
             "SUBMIT",

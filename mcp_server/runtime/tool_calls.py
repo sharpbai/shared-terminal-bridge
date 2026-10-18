@@ -9,6 +9,7 @@ from mcp_server.config import (
     REQUIRES_BRIDGE_V8, REQUIRES_BRIDGE_V9,
 )
 from mcp_server.transport import MCPError
+from bridge.protocol.model_view import model_view
 
 class ToolCallService:
     def __init__(self, server):
@@ -104,21 +105,37 @@ class ToolCallService:
             bridge_response = self.server.acquire_session(
                 arguments["name"], request_meta=params.get("_meta") or {}
             )
-        elif name == "terminal_wait_job":
+        elif name in {"terminal_wait_job", "terminal_run"}:
+            if name == "terminal_run" and arguments.get("resource_class") in {"high_io", "full_scan"}:
+                turn = self.server.turn_resolver.from_request(params.get("_meta") or {})
+                if turn:
+                    arguments = {**arguments, "_authorization": turn}
             wait_id = f"wait_{uuid.uuid4().hex[:12]}"
             with self.server.request_lock:
                 self.server.request_wait_ids[request_id] = wait_id
                 cancelled_early = request_id in self.server.cancelled_requests
                 self.server.cancelled_requests.discard(request_id)
             if cancelled_early:
+                if name == "terminal_run":
+                    with self.server.request_lock:
+                        self.server.request_wait_ids.pop(request_id, None)
+                    return self.server.tool_result({"ok": True, "result": {
+                        "state": "WAIT_CANCELLED", "task_executed": False}}, modern)
                 self.server.bridge.call("terminal_cancel_wait", {"wait_id": wait_id})
             try:
                 bridge_response = self.server.bridge.call(
-                    "terminal_wait_job", {**arguments, "wait_id": wait_id}
+                    name, {**arguments, "wait_id": wait_id}
                 )
             finally:
                 with self.server.request_lock:
                     self.server.request_wait_ids.pop(request_id, None)
+        elif name == "terminal_approve_request":
+            turn = self.server.turn_resolver.from_request(params.get("_meta") or {})
+            if not turn:
+                bridge_response = {"ok": False, "error": {"code": "CODEX_TURN_ID_UNAVAILABLE",
+                    "message": "Approval needs a verified later user turn or an explicit local decision."}}
+            else:
+                bridge_response = self.server.bridge.call(name, {**arguments, "_authorization": turn})
         else:
             bridge_method = (
                 "execution_status"
@@ -127,7 +144,7 @@ class ToolCallService:
             )
             bridge_response = self.server.bridge.call(bridge_method, arguments)
         if (
-            name in (REQUIRES_BRIDGE_V2 | REQUIRES_BRIDGE_V3 | REQUIRES_BRIDGE_V4 | REQUIRES_BRIDGE_V5 | REQUIRES_BRIDGE_V6 | REQUIRES_BRIDGE_V7 | REQUIRES_BRIDGE_V8 | REQUIRES_BRIDGE_V9)
+            name in (REQUIRES_BRIDGE_V2 | REQUIRES_BRIDGE_V3 | REQUIRES_BRIDGE_V4 | REQUIRES_BRIDGE_V5 | REQUIRES_BRIDGE_V6 | REQUIRES_BRIDGE_V7 | REQUIRES_BRIDGE_V8 | REQUIRES_BRIDGE_V9 | {"terminal_run", "terminal_input_job", "terminal_interrupt_job", "terminal_approve_request"})
             and bridge_response.get("error", {}).get("code") == "METHOD_NOT_FOUND"
         ):
             bridge_response = {
@@ -141,6 +158,7 @@ class ToolCallService:
         return self.server.tool_result(bridge_response, modern)
 
     def tool_result(self, bridge_response, modern):
+        bridge_response = model_view(bridge_response)
         is_error = not bridge_response.get("ok", False)
         result = {
             "content": [
@@ -206,15 +224,11 @@ class ToolCallService:
             lease = status.get("result", {}).get("lease")
             if lease and lease.get("state") == "ACTIVE":
                 authorization = lease.get("authorization") or {}
-                if authorization.get("turn_id") == turn.get("turn_id"):
+                if (authorization.get("turn_id") == turn.get("turn_id")
+                        and authorization.get("thread_id") == turn.get("thread_id")):
                     return {
-                        "ok": False,
-                        "error": {
-                            "code": "EXECUTION_LEASE_ALREADY_ACTIVE",
-                            "session": name,
-                            "pane": pane,
-                            "generation": lease.get("generation"),
-                        },
+                        "ok": True,
+                        "result": {**lease, "session": name, "idempotent": True},
                     }
         response = self.server.bridge.call(
             "acquire_execution",

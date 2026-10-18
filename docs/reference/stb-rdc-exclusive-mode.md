@@ -1,6 +1,6 @@
 # STB-RDC Exclusive Mode
 
-> 当前版本：STB v0.15.1 / Bridge API v9 · 2026-10-12（contract 自 v0.15.0 引入）
+> 当前版本：STB v0.16.0 / Bridge API v9 · 2026-10-19（contract 自 v0.15.0 引入）
 
 ## 问题
 
@@ -27,9 +27,9 @@
 
 ## 强制层级
 
-当前仓库能够强制 STB 自身的 pane/lease/action 边界，并通过 MCP instructions 与 routing skill 强制模型侧 Exclusive Mode。真正阻止宿主同时调用独立 RDC tools，还需要宿主/连接器层支持 capability filtering 或 policy hook。
+当前仓库强制 STB 自身的 pane/action 边界，并通过 MCP 自发现 instructions、工具 schema 和 RDC bootstrap 声明模型侧 Exclusive Mode，不再依赖本地 routing skill。说明约束不等于宿主硬隔离；真正阻止独立 RDC tools 旁路仍需要宿主/连接器支持 capability filtering 或 policy hook。
 
-因此 v0.15 分两层：当前已落地 routing skill + MCP contract + 文档/回归测试，使模型在 STB-RDC 任务中 fail-closed；最终硬隔离由 RDC/宿主根据 STB-RDC task context 隐藏或拒绝非 transport tools，仅接受带人工 one-shot approval token 的指定 bypass。
+因此分两层：当前通过 MCP 自发现契约、RDC bootstrap 与文档/回归测试，约束模型在 STB-RDC 任务中 fail-closed；最终硬隔离由 RDC/宿主根据 STB-RDC task context 隐藏或拒绝非 transport tools，仅接受带人工 one-shot approval token 的指定 bypass。
 
 在硬隔离完成前，不把提示词约束描述成物理安全边界。
 

@@ -148,7 +148,7 @@ class MinimalMCPServerTest(unittest.TestCase):
         )
         names = [tool["name"] for tool in server.list_tools(True)["tools"]]
         self.assertIn("terminal_wait_delta", names)
-        self.assertIn("terminal_long_run_approve", names)
+        self.assertIn("terminal_approve_request", names)
         self.assertIn("terminal_session_read_delta", names)
         self.assertIn("terminal_session_wait_delta", names)
         self.assertIn("terminal_session_state", names)
@@ -167,22 +167,20 @@ class MinimalMCPServerTest(unittest.TestCase):
         )
         server = MinimalMCPServer(bridge, enable_actions=True)
         names = [tool["name"] for tool in server.list_tools(True)["tools"]]
-        self.assertIn("terminal_long_run_request", names)
+        self.assertIn("terminal_run", names)
         response = server.handle(
             {
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "tools/call",
                 "params": modern_params(
-                    name="terminal_long_run_request",
+                    name="terminal_run",
                     arguments={
                         "pane": "%7",
-                        "generation": 42,
+                        "request_id": "risk-run",
                         "text": "du -xhd1 /large",
                         "expected_duration_ms": 180_000,
                         "resource_class": "full_scan",
-                        "idle_budget_ms": 30_000,
-                        "total_budget_ms": 180_000,
                     },
                 ),
             }
@@ -218,7 +216,7 @@ class MinimalMCPServerTest(unittest.TestCase):
         names = [tool["name"] for tool in tools]
         self.assertIn("terminal_history", names)
         request_tool = next(
-            tool for tool in tools if tool["name"] == "terminal_long_run_request"
+            tool for tool in tools if tool["name"] == "terminal_run"
         )
         required = request_tool["inputSchema"]["required"]
         self.assertNotIn("idle_budget_ms", required)
@@ -228,11 +226,11 @@ class MinimalMCPServerTest(unittest.TestCase):
         server = MinimalMCPServer(FakeBridgeV8(), enable_actions=True)
         tools = server.list_tools(True)["tools"]
         names = [tool["name"] for tool in tools]
-        self.assertIn("terminal_task_block_execute", names)
+        self.assertNotIn("terminal_task_block_execute", names)
         runner = next(
-            tool for tool in tools if tool["name"] == "terminal_task_block_execute"
+            tool for tool in tools if tool["name"] == "terminal_run"
         )
-        self.assertEqual(runner["inputSchema"]["properties"]["steps"]["maxItems"], 8)
+        self.assertNotIn("generation", runner["inputSchema"]["properties"])
 
         old_server = MinimalMCPServer(FakeBridgeV7(), enable_actions=True)
         old_names = [tool["name"] for tool in old_server.list_tools(True)["tools"]]

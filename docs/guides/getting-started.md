@@ -192,4 +192,4 @@ MCP host 可以用以下方式启动 adapter：
 
 ### 人工中断后模型还能继续吗
 
-当前回合不能。Human Override 会撤销旧 generation，并要求模型在读取至多一次已有结果后结束当前回合。用户随后发送新的操作请求时，同一 Codex 任务可以基于新的 turn identity 重新 acquire。
+旧执行链不能恢复；中断后新收到的明确 `terminal_run` 可以继续，不必先 acquire。Core 以本地接收顺序管理权限，同一 ID 重试只观察原任务。高风险仍需单独批准。

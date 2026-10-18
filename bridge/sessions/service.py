@@ -33,6 +33,10 @@ class SessionService:
             "execution_status",
             "terminal_type",
             "terminal_submit",
+            "terminal_run",
+            "terminal_input_job",
+            "terminal_approve_request",
+            "terminal_interrupt_job",
             "terminal_long_run_request",
             "terminal_long_run_approve",
             "terminal_long_run_requests",
@@ -63,6 +67,11 @@ class SessionService:
             "version": BRIDGE_VERSION,
             "api_version": BRIDGE_API_VERSION,
             "methods": methods,
+            "execution_policy": "local-receipt-auto-renew-v1",
+            "command_request_dedup": "durable-submit-v1",
+            "terminal_run": "receipt-scoped-run-v1",
+            "model_tasks": "job-authority-v2",
+            "job_control": "job-bound-interrupt-v1",
         }
 
     def terminal_list(self):
@@ -215,7 +224,7 @@ class SessionService:
             self.bridge.binding_snapshot_taken = True
         self.bridge.tmux.install_human_binding(
             self.bridge.event_socket,
-            pathlib.Path(__file__).resolve(),
+            pathlib.Path(__file__).resolve().parents[1] / "local_bridge.py",
         )
         with self.bridge.lock:
             self.bridge.human_binding_installed = True

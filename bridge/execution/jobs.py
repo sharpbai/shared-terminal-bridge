@@ -5,6 +5,8 @@ import subprocess
 import sys
 import threading
 import uuid
+from bridge.prompt_detection import same_prompt_family
+from bridge.execution.lifecycle import EXECUTING, sync_execution_phase, execution_phase
 
 try:
     from bridge.common import BridgeError, now, unix_ms
@@ -73,6 +75,7 @@ class JobService:
             "expected_duration_ms": expected_duration_ms,
             "resource_class": resource_class,
             "state": "RUNNING",
+            "execution_phase": EXECUTING,
             "completion_confidence": None,
             "submitted_at": now(),
             "submitted_at_ms": submitted_at_ms,
@@ -98,7 +101,7 @@ class JobService:
                 removable = next(
                     (
                         existing_id for existing_id, existing in self.bridge.jobs.items()
-                        if existing_id != job_id and existing.get("state") != "RUNNING"
+                        if existing_id != job_id and execution_phase(existing) != EXECUTING
                     ),
                     None,
                 )
@@ -216,7 +219,14 @@ class JobService:
             job["completion_confidence"] = "tmux_state"
         elif (
             job["baseline_prompt"]
-            and evidence["last_line"] == job["baseline_prompt"]
+            and (
+                evidence["last_line"] == job["baseline_prompt"]
+                or (
+                    same_prompt_family(job["baseline_prompt"], evidence["last_line"])
+                    and job.get("baseline_pane_command")
+                    and evidence["pane_command"] == job["baseline_pane_command"]
+                )
+            )
             and current != baseline
             and current_ms - job["last_change_ms"] >= JOB_PROMPT_STABLE_MS
         ):
@@ -226,6 +236,7 @@ class JobService:
         elif current_ms >= job["hard_deadline_ms"]:
             job["state"] = "HUMAN_DECISION_REQUIRED"
             job["completion_confidence"] = "deadline"
+        sync_execution_phase(job)
 
     def _publish_terminal_job(self, job):
         if job["state"] not in JOB_TERMINAL_STATES:
@@ -247,6 +258,15 @@ class JobService:
             job = self.bridge.jobs.get(job_id)
             if job is None:
                 raise BridgeError("TERMINAL_JOB_NOT_FOUND", job_id=job_id)
+            if job.get('event_stream_pending') or job.get('stream_epoch'):
+                # Output/key ordering belongs exclusively to the control
+                # stream. A later capture here must not overtake a queued key.
+                if (job['state'] == 'RUNNING'
+                        and unix_ms() >= job['hard_deadline_ms']):
+                    job.update(state='HUMAN_DECISION_REQUIRED', completion_confidence='deadline')
+                    self.bridge.persist_state()
+                    self.bridge._signal_job_waits(job_id, job['state'])
+                return job
             if job["state"] in JOB_TERMINAL_STATES:
                 return job
             pane = job["pane"]
@@ -300,7 +320,8 @@ class JobService:
         result = {
             key: job.get(key) for key in (
                 "job_id", "pane", "generation", "command", "command_fingerprint",
-                "expected_duration_ms", "resource_class", "state",
+                "expected_duration_ms", "resource_class", "state", "execution_phase",
+                "stream_epoch", "last_stream_seq", "event_stream_lost",
                 "completion_confidence", "submitted_at", "hard_deadline_ms",
                 "strategy_review_at_ms", "last_activity_at", "progress",
                 "last_meaningful_activity_at", "last_evidence_lines",
@@ -318,7 +339,7 @@ class JobService:
         )
         result["recommended_action"] = {
             "COMPLETED": "CONTINUE",
-            "INTERRUPTED_BY_HUMAN": "STOP_CURRENT_TURN",
+            "INTERRUPTED_BY_HUMAN": "STOP_CURRENT_EXECUTION_CHAIN",
             "NEEDS_ATTENTION": "MODEL_OR_HUMAN_DECISION",
             "HUMAN_DECISION_REQUIRED": "HUMAN_DECISION",
             "RUNNING": "WAIT",

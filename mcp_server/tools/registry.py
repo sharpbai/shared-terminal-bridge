@@ -3,21 +3,18 @@
 Start here to locate the schema for a public MCP tool.
 """
 
-from mcp_server.tools.execution import TOOLS as EXECUTION_TOOLS
 from mcp_server.tools.jobs import TOOLS as JOB_TOOLS
-from mcp_server.tools.long_run import TOOLS as LONG_RUN_TOOLS
 from mcp_server.tools.observation import TOOLS as OBSERVATION_TOOLS
 from mcp_server.tools.sessions import TOOLS as SESSION_DOMAIN_TOOLS
 from mcp_server.tools.task_blocks import TOOLS as TASK_BLOCK_TOOLS
+from mcp_server.tools.tasks import TOOLS as MODEL_TASK_TOOLS
 
 
-SESSION_ACQUIRE = SESSION_DOMAIN_TOOLS[0]
+# The first legacy definition is not part of the model API.
 SESSION_TOOLS = SESSION_DOMAIN_TOOLS[1:]
 ACTION_TOOLS = [
-    *LONG_RUN_TOOLS,
-    *TASK_BLOCK_TOOLS,
-    SESSION_ACQUIRE,
-    *EXECUTION_TOOLS,
+    *MODEL_TASK_TOOLS,
+    *[tool for tool in TASK_BLOCK_TOOLS if tool["name"] == "terminal_program_profile"],
 ]
 
 TOOLS_BY_NAME = {

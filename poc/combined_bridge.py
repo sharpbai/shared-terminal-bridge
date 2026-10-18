@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import time
+import shlex
 
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -235,8 +236,24 @@ def main() -> int:
         )
         active_after_agent = call("execution_status", {"pane": pane_a})
 
-        emit_human_event(pane_a)
+        # Human Override now requires an executing STB job, not an idle lease.
+        call('terminal_submit', dict(pane=pane_a, generation=generation,
+                                     text='sleep 60', expected_duration_ms=60000))
+        deadline = time.monotonic() + 5
+        while tmux('display-message', '-p', '-t', pane_a,
+                   '#{pane_current_command}', capture=True).stdout.strip() != 'sleep':
+            if time.monotonic() >= deadline:
+                raise RuntimeError('interrupt fixture did not start')
+            time.sleep(.01)
+        keys = shlex.split(tmux('list-keys', '-T', 'root', 'C-c', capture=True).stdout)
+        tmux(*keys[keys.index('C-c') + 1:])
         revoked = wait_for_revoked(pane_a)
+        renewed = call('terminal_type', dict(pane=pane_a, generation=generation, text=''))
+        if (not renewed.get('ok')
+                or renewed.get('result', {}).get('generation', 0) <= generation):
+            raise RuntimeError('new local call did not automatically renew')
+        # After renewal an obsolete generation is still invalid; callers must
+        # use the effective generation returned by their new command call.
         stale = call(
             "terminal_type",
             {

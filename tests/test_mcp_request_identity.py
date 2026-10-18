@@ -58,9 +58,11 @@ class RequestIdentityTest(unittest.TestCase):
 
     def test_tool_dispatch_passes_envelope_not_arguments(self):
         server = MinimalMCPServer(FakeBridgeV3(), enable_actions=True, enable_session_management=True)
-        with mock.patch.object(server, "acquire_session", return_value={"ok": False}) as acquire:
-            server.call_tool({"name": "terminal_session_acquire", "arguments": {"name": "local-mac"}, "_meta": self.meta}, False)
-            acquire.assert_called_once_with("local-mac", request_meta=self.meta)
+        server.turn_resolver = self.resolver
+        server.call_tool({"name": "terminal_run", "arguments": {
+            "pane": "%0", "request_id": "logical", "text": "echo x", "resource_class": "high_io"}, "_meta": self.meta}, False)
+        self.assertEqual(server.bridge.calls[-1][1]["_authorization"],
+                         self.resolver.from_request(self.meta))
 
     def test_failure_does_not_reach_bridge(self):
         bridge = FakeBridgeV3()

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from bridge.prompt_detection import same_prompt_family
 
 
 ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
@@ -127,13 +128,39 @@ class AIContextPolicy:
         command = command.strip()
         anchor = None
         for index in range(len(current) - 1, -1, -1):
-            if command and current[index].strip().endswith(command):
-                anchor = index
+            # capture-pane may wrap one command echo across physical rows.
+            joined = ""
+            for end in range(index, min(len(current), index + len(command) + 1)):
+                joined += current[end]
+                if command and joined.strip().endswith(command):
+                    anchor = end
+                    break
+                if len(joined) > len(command) + len(current[index]) + 1:
+                    break
+            if anchor is not None:
                 break
         if anchor is not None:
             lines = current[anchor + 1 :]
         else:
-            lines = cls.delta(cls.normalize(previous_content), current)
+            previous = cls.normalize(previous_content)
+            while previous and not previous[-1].strip():
+                previous.pop()
+            lines = cls.delta(previous, current)
+            # The last baseline prompt row becomes the command echo. Keep
+            # stable preceding rows out of the job result even with no overlap.
+            if lines == current and previous:
+                common = 0
+                for before, after in zip(previous, current):
+                    if before != after:
+                        break
+                    common += 1
+                if common >= len(previous) - 1:
+                    lines = current[common:]
+        prompt = next((line for line in reversed(cls.normalize(previous_content)) if line.strip()), "")
+        for index, line in enumerate(lines):
+            if same_prompt_family(prompt, line):
+                lines = lines[:index + 1]
+                break
         return cls.apply(
             "",
             "\n".join(lines),

@@ -20,6 +20,7 @@ STB 按产品功能域组织代码。遇到一个工具或行为时，先在下�
 | `terminal_session_*` | `mcp_server/tools/sessions.py` | `bridge/sessions/service.py` |
 | Execution Lease、generation、`terminal_type` | `mcp_server/tools/execution.py` | `bridge/execution/authority.py` |
 | `terminal_submit` | `mcp_server/tools/execution.py` | `bridge/execution/submit.py` |
+| `terminal_run`、job 输入/中断/审批 | `mcp_server/tools/tasks.py` | `bridge/execution/run.py`、`job_actions.py`；去重见 `bridge/runtime/command_requests.py` |
 | job 创建与状态更新 | `mcp_server/tools/jobs.py` | `bridge/execution/jobs.py` |
 | `terminal_job_*`、`terminal_wait_job` | `mcp_server/tools/jobs.py` | `bridge/execution/job_wait.py`；状态判定见 `jobs.py` |
 | `terminal_long_run_*` | `mcp_server/tools/long_run.py` | `bridge/execution/long_run.py` |
@@ -27,6 +28,8 @@ STB 按产品功能域组织代码。遇到一个工具或行为时，先在下�
 | Task Block 只读命令判断 | 无独立工具 | `bridge/execution/read_only_policy.py` |
 | `terminal_program_profile` | `mcp_server/tools/task_blocks.py` | `bridge/sessions/service.py`；数据在 `bridge/config.py` |
 | Human `Ctrl+C` / Human Override | 无独立 MCP 写入入口 | `bridge/runtime/human_events.py` |
+| 输出/按键有序事件与执行阶段 | 无独立 MCP 写入入口 | `bridge/tmux/control_stream.py`、`bridge/runtime/terminal_events.py`、`bridge/execution/lifecycle.py` |
+| 本地接收顺序与自动续授权 | 沿用 submit/acquire 工具 | `bridge/runtime/admission.py`、`bridge/execution/authority.py`、`LocalBridge.dispatch` |
 | 审计与持久化历史 | `mcp_server/tools/observation.py` | `bridge/runtime/audit.py` |
 
 Bridge socket 方法的完整注册表位于 `bridge/protocol/registry.py`。MCP 工具的完整注册表位于 `mcp_server/tools/registry.py`。不知道入口时只需先打开这两个小文件之一。
@@ -38,6 +41,7 @@ Bridge socket 方法的完整注册表位于 `bridge/protocol/registry.py`。MCP
 | 读取、增量与等待 | `bridge/observation/service.py` | `tests/test_bridge_observation.py` |
 | Lease、generation 与 turn gate | `bridge/execution/authority.py` | `tests/test_turn_gate.py` |
 | 命令提交与 Job 状态 | `bridge/execution/submit.py`、`jobs.py`、`job_wait.py` | `tests/test_bridge_jobs.py` |
+| Run 授权/提交/等待组合 | `bridge/execution/run.py` | `tests/test_terminal_run.py`、`tests/host_tmux/test_terminal_run.py` |
 | 长任务批准 | `bridge/execution/long_run.py` | `tests/test_bridge_long_run.py` |
 | Task Block 与只读 Runner | `bridge/execution/task_blocks.py`、`read_only_policy.py` | `tests/test_bridge_task_blocks.py` |
 | 托管会话与 tmux 操作 | `bridge/sessions/service.py`、`bridge/tmux/backend.py` | `tests/test_bridge_sessions.py`；宿主机基线见 `tests/host_tmux/` |
@@ -72,6 +76,7 @@ bridge/
     ├── authority.py            # pane ACL、lease、generation
     ├── long_run.py             # 长任务请求与审批
     ├── submit.py               # 命令完整性检查和提交
+    ├── run.py                  # 同 receipt 内授权、单次提交和等待
     ├── jobs.py                 # job 创建、监控与状态更新
     ├── job_wait.py             # job 查询、等待和取消等待
     ├── task_blocks.py          # task block 规划、执行与观察
