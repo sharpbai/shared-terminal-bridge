@@ -69,6 +69,8 @@ MCP 创建 session 并返回 `name` 后，在项目目录执行：
 
 ## 手工管理命令
 
+以下是人工管理面，不是 Agent 的逐步执行协议。模型日常使用 run/job ID；lease/release 仅保留给管理员诊断，不能为查看历史抢占任务权限。
+
 ```bash
 ./stb list
 ./stb list --json

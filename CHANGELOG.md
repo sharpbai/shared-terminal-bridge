@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 文档统一按 guides/reference/development/validation/history 分层；按日记录进入 history/changes，重写当前架构、传输与上下文边界，修复旧模型调用说明及手册导航。
+
 ## v0.16.0 — 2026-10-19
 
 破坏性模型接口更新：MCP 改用 run/job ID，不兼容旧 acquire/submit/generation 工具。升级 Core 与 STB-RDC v0.3.0 后重启 Bridge，并重连 MCP 刷新工具；重启撤销旧授权但不终止 tmux 进程。Bridge API 保持 v9，以能力字段校验新版任务契约。

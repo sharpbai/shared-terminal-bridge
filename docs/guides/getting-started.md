@@ -96,18 +96,20 @@ python3 bridge/local_bridge.py serve \
 
 `--direct` 仍只允许停止带 managed 标记的 session。
 
-## 租约与人工授权
+## 授权与审批
 
-本地管理员可以显式授予和释放执行租约：
+模型默认使用 terminal_run，由 Core 内部处理授权和等待，不需要逐条申请 lease 或传 generation。只有 STB 任务执行期间的人工 Ctrl+C 会取消该旧执行链；空闲操作不撤权。新明确调用按本地接收顺序处理，同一逻辑 ID 重试不重放旧命令。
+
+本地管理员诊断时仍可显式管理内部执行租约（不是模型调用流程）：
 
 ```bash
 ./stb lease NAME
 ./stb release NAME GENERATION
 ```
 
-创建 session 不等于取得 execution lease。真实用户在 pane 中按下 `Ctrl+C` 后，当前 generation 会被撤销；旧 generation 的后续写入会在到达 pane 前被拒绝。
+创建 session 不等于执行命令。lease/release 属于人工诊断面，不要为了只读观察释放或抢占其他任务权限。
 
-长任务批准请求：
+资源风险批准请求（单纯耗时长不自动要求批准）：
 
 ```bash
 ./stb approvals
@@ -186,9 +188,9 @@ MCP host 可以用以下方式启动 adapter：
 
 当前版本会在创建首个托管 session 时 bootstrap tmux server。若仍出现该错误，确认 tmux 可执行文件可用，并查看 `stb daemon logs`。
 
-### `EXECUTION_LEASE_ALREADY_ACTIVE`
+### `TERMINAL_BUSY` 或内部 `EXECUTION_LEASE_ALREADY_ACTIVE`
 
-观察历史不需要 lease，直接使用只读工具或 `stb history`。只有准备写入时才需要为当前 Codex 任务和用户回合取得授权。不要为了“看看输出”释放或抢占另一个有效 lease。
+观察历史不需要 lease，直接使用只读工具或 `stb history`。写入被当前任务占用时先观察并协调，不释放或抢占另一个有效任务。模型只传 run/job ID，不通过回合身份或授权计数手动恢复。
 
 ### 人工中断后模型还能继续吗
 

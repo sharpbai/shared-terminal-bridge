@@ -1,39 +1,44 @@
-# 无额外 Shell 的命令传输与重试
+# 命令传输、单行边界与重试
 
-2026-10-18：已实现阶段一、二；真正的多行执行未开放。代码更新后需重启 Core 才会生效，`bridge_info.command_request_dedup=durable-submit-v1` 是运行时能力标志。
+当前模型入口为 run/job ID。Core 提供 `command_request_dedup=durable-submit-v1` 和 `model_tasks=job-authority-v2` 能力；版本字符串或源文件存在不能代替运行能力检查。
 
-## 两条入口，同一个执行边界
+## 命令只由目标 Shell 解释
 
-| 路径 | 命令怎样传递 |
+| 路径 | 传递方式 |
 | --- | --- |
-| Codex → STB MCP | `terminal_submit` 的 JSON `text` 原样传给 Core |
-| ChatGPT → RDC → Adapter | 固定启动 `stb-rdc serve-stdio`，随后通过 RDC 标准输入传 JSONL；Adapter 经 Unix socket 将 `text` 原样传给 Core |
+| Codex → MCP → Core | terminal_run 的 JSON text |
+| ChatGPT → RDC → Adapter → Core | 固定启动 serve-stdio，stdin JSONL 的 params.text；随后 Unix socket JSON |
 
-只有目标 Shell 解释命令。JSON 在每个协议边界只解析一次，不额外反转义、不替换 `\\n`、不展开 `$`、不 trim 命令。不通过本地 Shell 参数携带目标命令，不注入目标脚本或标记文件。复杂单行仍须是目标 Shell 的有效语法；无损传输不修复本身写错的命令。
+每个协议边界只解析一次 JSON。不额外展开美元符、引号和反斜杠，不 trim 命令，不把目标命令拼入本地启动 Shell。无损传输只保证原文，不保证目标语法正确。
 
-`terminal_submit` 拒绝真实 CR/LF、NUL 和其他 ASCII 控制字符；字面量 `\n` 和 `\u0003` 不会变成换行或 Ctrl+C。中断使用 `terminal_interrupt`。现有 Task Block Runner 保持受限的逐步执行，不把多行字符串自动拆成命令。
+真正 CR/LF、NUL、Ctrl+C 等 ASCII 控制字符不作为 run 文本输入；字面量反斜杠转义不自动变成控制键。控制键用 job input 的 key 或 job interrupt。真正多行执行、自动拆分、目标脚本与 marker 注入均不提供。
 
-## 请求身份与去重
+## 逻辑请求身份
 
-提交时建议始终附带唯一 `request_id`（1–128 字符，例如 UUID）。旧调用不带 ID 仍兼容，但不具备这项重放保护。MCP JSON-RPC 请求 ID 与逻辑命令 ID 不同：运输重试可以有不同 RPC ID，但必须保留原来的 `request_id` 和全部参数。
+模型 run 必须提供唯一逻辑 request_id（RDC 来自 Envelope id）。JSON-RPC ID 是传输编号，不能代替命令身份。run 的观察窗口 wait_ms/wait_id 可以改变，命令身份参数必须保持一致。
 
-Core 在续租和终端输入之前，持久化逻辑 ID 与完整参数的 SHA-256 指纹；指纹不另存原始命令。缓存的结果/拒绝沿用 Core 字段，审批拒绝等错误可能包含命令，应与原有私有状态文件同等保护。
+| 情况 | 行为 |
+| --- | --- |
+| 相同 ID、相同命令身份 | 继续观察原 job，不续授权、不再次输入、不再次消费批准 |
+| 相同 ID、不同命令身份 | COMMAND_REQUEST_CONFLICT |
+| 处理中或崩溃仅留下预留 | COMMAND_REQUEST_AMBIGUOUS，查询证据或交人工，不换 ID 猜测重发 |
+| 人工取消后重试旧 ID | 返回原任务状态，不重放取消的步骤 |
+| 新的明确决策 | 新 ID，按本地接收顺序处理；高风险仍批准 |
 
-- 同 ID、同参数：返回原提交结果或原拒绝；不续租、不再输入、不再消耗批准。
-- 同 ID、不同参数：`COMMAND_REQUEST_CONFLICT`。
-- 同 ID 正在处理，或崩溃只留下预留记录：`COMMAND_REQUEST_AMBIGUOUS`。查询 pane/job 或交给人工，不能换 ID 猜测重发。
-- Human Ctrl+C 后重试旧 ID：仍返回原 job，不自动获得新授权；原 job 的最新状态通过 job/wait 查询。
-- 真正的新决策使用新 ID，按 Core 本地接收顺序续授权；高风险批准仍独立生效。批准后改变参数也属于新请求。
+Core 在执行前持久预留 ID 与参数指纹，再保存提交回执和 job。崩溃窗口存在，因此承诺“不盲目重放”，不是跨崩溃 exactly-once。若已提交但 job 被清理，报无法找到，不重新执行。
 
-结果落盘前会有崩溃窗口，因此只保证“不盲目重放”，不宣称跨崩溃 exactly-once。日志与 daemon 状态文件共同持久化，权限沿用 0600；不要删除状态来绕过去重。最多保留 10000 个 ID，达到容量时 `COMMAND_REQUEST_CAPACITY` 拒绝新增，不静默淘汰保护记录。现阶段尚无自动归档/清理入口。
+## 持久化与容量
 
-收到提交结果只代表已提交，提示符返回只代表观测到命令结束，不等于退出码为零或业务成功。需要输出证据再判断。
+去重记录随私有 daemon 状态持久化，文件权限 0600。虽然指纹不另存命令原文，缓存结果或审批错误可能包含命令，应按敏感运行状态保护。不要删状态来绕过去重。
 
-## 验证入口
+最多保留 10000 个逻辑 ID，满后以 COMMAND_REQUEST_CAPACITY 拒绝新增，不静默淘汰保护记录；当前没有自动归档入口。
 
-- `tests/test_command_transport.py`：真实 MCP 协议入口 → Core → 捕获后端；引号、awk `$1/$2`、反斜杠、Windows 路径、正则、Unicode、字面量转义；去重、人工中断、重启状态、真实换行拒绝。
-- `tests/test_rdc_transport_integration.py`：复用同一语料，经分片 stdin JSONL → Adapter → 真实 Unix socket → Core → 捕获后端。需要相邻的 RDC 代码库；独立 Core CI 可跳过。沙箱禁止本地 socket 时在宿主运行。
-- `tests/host_tmux/test_command_quoting.py`：隔离 tmux control stream → 真实 Shell，核对实际输出，不只核对命令回显。
-- Adapter 自身 `tests/test_stdio.py`：独立运行，无需 Core、RDC 或 tmux。
+## 实现与回归
 
-代码定位：`bridge/runtime/command_requests.py` 管去重，`bridge/runtime/state.py` 管恢复，`bridge/execution/submit.py` 管命令校验。原有 lease、审批、事件流和任务状态机不搬入 Adapter。
+- `bridge/runtime/command_requests.py`：预留、指纹和结果；`state.py`：恢复。
+- `bridge/execution/run.py`：执行去重、观察可重复；底层 submit 校验不属于模型兼容接口。
+- `tests/test_command_transport.py`：MCP 特殊字符、去重、中断、恢复和控制字符拒绝。
+- `tests/test_rdc_transport_integration.py`：相邻 Adapter 经分片 stdin、真实 Unix socket，验证逐字传输与响应丢失重试；独立仓库 CI 可跳过。
+- `tests/host_tmux/test_command_quoting.py`：隔离真实 tmux/Shell 输出，不只核对回显。
+
+内部步骤见 [Run](terminal-run.md)，模型调用见 [任务接口](model-tasks.md)，RDC 封装见 [JSONL 契约](../../../shared-terminal-bridge-rdc/docs/reference/stdio-transport.md)。

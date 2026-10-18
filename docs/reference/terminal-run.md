@@ -6,7 +6,7 @@
 
 ## 接口与能力发现
 
-运行 daemon 的 `bridge_info.terminal_run=receipt-scoped-run-v1` 才表示支持；仅更新源文件不够，需要重启 Bridge。API v9 和版本号未因这次未发布改动递增。
+运行 daemon 的 `bridge_info.terminal_run=receipt-scoped-run-v1` 和 `model_tasks=job-authority-v2` 才表示支持当前契约；仅更新源文件不够，需要重启 Bridge。该接口随 v0.16.0 发布，API 仍为 v9。
 
 ```json
 {"method":"terminal_run","params":{"pane":"%0","request_id":"NEW_UNIQUE_COMMAND_ID","text":"df -h /","expected_duration_ms":1000,"resource_class":"normal","wait_ms":600000}}
@@ -42,4 +42,4 @@
 
 `bridge/execution/run.py` 实现组合，`bridge/runtime/command_requests.py` 继续负责持久去重。`tests/test_terminal_run.py` 覆盖授权、旧 receipt、链内中断、批准、去重、取消等待；`tests/host_tmux/test_terminal_run.py` 在隔离 tmux 中验证完成、人工事件唤醒、旧 ID 重试与新调用续权。
 
-该接口不注入脚本、不开放真正多行执行、不自动合并多个需判断的命令。首次 run 无需模型先拿 generation，后续涉及独立按键或审批仍使用真实返回的 generation。
+该接口不注入脚本、不开放真正多行执行、不自动合并多个需判断的命令。首次 run 无需模型先拿 generation，后续交互/中断使用 job ID，审批使用请求 ID；内部授权计数不进入模型参数。

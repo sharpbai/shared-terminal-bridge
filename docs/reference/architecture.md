@@ -1,152 +1,56 @@
-# 高层架构
+# STB 架构与执行边界
 
-具体实施顺序和各阶段验收条件见 [后续路线图](../roadmap.md)。
-按修改范围划分的源码导航见 [代码结构与阅读边界](../development/code-structure.md)。
-
-## 产品定位
-
-Shared Terminal Bridge 服务的是“Human 主操作、Agent 旁路协作”的工作方式：
-
-- Terminal 仍然是主要交互界面。
-- 用户可以直接执行 SSH、运维命令、编辑器和交互程序。
-- Codex 不要求用户复制粘贴终端内容。
-- Codex 按需读取同一个 tmux pane 的历史。
-- Agent 的输入能力晚于只读能力，并受授权和 execution lease 约束。
-
-它不是一个新的 Web Terminal，也不是将 Shell 包在 Codex TUI 下面。
-
-## 系统组件
+STB 让人和 Agent 共用同一个真实 tmux pane。Terminal/SSH 仍是人的操作界面，Bridge 是本地控制面，不创建模型专属隐藏 Shell。
 
 ```text
-┌─────────────────────────┐     ┌─────────────────────────┐
-│ Terminal                │     │ Codex                   │
-│                         │     │                         │
-│ Human → tmux client     │     │ task/reasoning context  │
-└────────────┬────────────┘     └────────────┬────────────┘
-             │                               │ MCP/local API
-             ▼                               ▼
-┌─────────────────────────┐     ┌─────────────────────────┐
-│ tmux server             │◀───▶│ Terminal Bridge         │
-│                         │     │                         │
-│ session/window/pane     │     │ pane registry           │
-│ history buffer          │     │ read/input/event APIs   │
-│ client input key table  │     │ execution leases        │
-└────────────┬────────────┘     └────────────┬────────────┘
-             │                               ▲
-             │ HUMAN_INTERRUPT               │ local IPC
-             └──────── Human Event Layer ────┘
+Codex → MCP ──────────┐
+                      ├→ Bridge → 同一个 tmux pane → Shell / SSH / 程序
+ChatGPT → RDC Adapter ┘                 ↑
+                                  人工直接操作
 ```
 
-## 上下文分层
+## 组件职责
 
-1. Terminal 短期上下文：tmux scrollback，通常读取最近数千行。
-2. 当前任务上下文：Codex task 中正在处理的问题、假设和决策。
-3. 长期环境上下文：本地项目文档和 AGENTS.md，不依赖 scrollback 保存。
+| 组件 | 负责 | 不负责 |
+| --- | --- | --- |
+| tmux | session/pane、真实输入输出、scrollback、client 按键 | 模型推理和业务批准 |
+| Bridge Core | Pane ACL、任务状态、内部授权计数、事件顺序、去重、等待、审计 | 远程可达性或目标环境安装 |
+| MCP | 工具发现、结构化参数、取消观察、响应整形 | 第二套执行状态机 |
+| RDC Adapter | 设备通道上的发现、stdin JSONL 映射 | 直接操作 tmux 或复制权限逻辑 |
+| 模型 | 理解任务、制定命令、判断证据和风险 | 指定内部授权计数或绕过人工中断 |
 
-## Human/Agent 输入分流
+## 三类操作
 
-来源判定发生在 tmux，而不是 Terminal 模拟器：
+观察读取有界历史/增量，不申请写权，也不抢占其他执行任务。run 输入单行可见命令并返回 job；交互和中断只使用 job ID。session 管理属于独立、显式启用的能力。
 
-```text
-Human keyboard
-  → tmux client
-  → root key table
-  → pane
+模型只见任务契约，内部 lease/generation 仍严格存在，不能因隐藏字段而放宽。当前工具映射见 [模型接口](model-tasks.md)，不从历史 API 复制调用。
 
-Agent
-  → Terminal Bridge
-  → tmux send-keys
-  → pane
-```
+## 任务状态与人工事件
 
-真人 `Ctrl+C` 命中 root key binding。对已建立有序通道的 pane，binding 先向
-对应 control client 发布 `%message STB_INTERRUPT`，随后将 `C-c` 原样送入
-pane。输出通知和按键通知在同一 control-mode 连接内有序交付；Bridge 根据
-通知之前的任务状态决定是否撤权，不读取按键后的画面来猜测按键前状态。
-Agent 的 `send-keys` 直接写入 pane，不经过 client key table，所以不会产生
-Human 事件。只有同代 STB 命令处于执行阶段时才撤权，空闲 lease 不受影响。
+命令开始、终端输出、人工 Ctrl+C 进入同 pane 的有序事件流，以 epoch/sequence/job/内部授权关联。
 
-撤权取消当次执行链，不再要求结束整个模型回合。本地晚于中断接收的新调用可
-自动取得新 generation；旧调用内部步骤不能恢复。接收序号由
-`bridge/runtime/admission.py` 产生，不由模型参数提供；详见下方 MCP 执行语义。
+- 任务正在执行时人工 Ctrl+C 取消旧执行链、唤醒等待；后续输出不能把它改回正常完成。
+- 提示符已返回则归入结束；空闲按键不撤权。提示符匹配仍是启发式，不提供可信退出码。
+- 交互提示、观察超时和策略检查点不自动等于任务结束。
+- 事件流断开或缺序进入需检查状态，不猜测成功或恢复写入。
+- Agent job interrupt 不产生 Human 来源事件；旧 job 不得控制新 job。
 
-实现入口是 `bridge/tmux/control_stream.py`（传输/顺序）和
-`bridge/runtime/terminal_events.py`（状态转换），详细约束见
-[MCP 执行语义](mcp-server.md)。control client 使用 `ignore-size`，不调整人的
-终端宽度；它会计入 tmux 的 attached client 数量。完成识别依然基于提示符规则，
-不是远端退出码或 Shell hook；未注入脚本、marker 或目标环境配置。
+新明确 run 按 Core 本地接收顺序内部授权；中断前旧调用及被取消调用的后续步骤不能续权。新调用不等于可以越过高风险批准或用户原任务范围。
 
-没有有序通道的旧任务保留本地事件 socket 与按键前快照兼容路径。
+## 去重与等待
 
-这里识别的严格含义是“来自 tmux client 的输入”和“通过 Bridge 注入的输入”。
-它不是操作系统级的人员身份认证。
+逻辑请求在终端副作用前持久预留，执行回执关联 job。同 ID 重试观察原任务，不再次输入；冲突、容量满或崩溃不确定状态拒绝盲目重放。
 
-## Execution Lease
+run 的执行部分只做一次，观察窗口可重复。Core 在本地等待状态变化，MCP 取消和 RDC 采集超时只结束观察，不发送 Ctrl+C。详细步骤见 [Run](terminal-run.md) 和 [传输与去重](command-transport.md)。
 
-未来每次允许 Agent 连续操作 pane 时创建 lease：
+## 上下文、持久化和恢复
 
-```json
-{
-  "pane": "%3",
-  "generation": 42,
-  "state": "ACTIVE"
-}
-```
+tmux 保存原始历史；Bridge 先裁剪、去回显和折叠重复，只返回判断所需的有界输出，见 [上下文策略](ai-context-policy.md)。长期操作知识进入项目文档，不靠完整 scrollback 维持。
 
-收到对应 pane 的 `HUMAN_INTERRUPT` 后：
+daemon 状态保存会话映射、任务和去重等；重启恢复撤销旧 ACTIVE 授权，不终止 tmux 进程。旧 cursor、运行状态和 server 身份需重新校验，不能把历史 pane/PID 当常量。运行能力以 bridge_info 为准，源文件更新不等于进程重载。
 
-1. 将 lease 标记为 `REVOKED`。
-2. 拒绝携带旧 generation 的后续输入。
-3. 保留已有终端和任务上下文。
-4. 等待用户再次明确授权，不自动重试或继续下一步。
+## 明确不做
 
-语义固定为：
+不注入目标脚本/marker，不假设远端 Python 或特定 Shell，不自动执行真正多行，不以模型自觉替代安全校验。高风险仍需人工批准；[Exclusive Mode](stb-rdc-exclusive-mode.md)不等于宿主已实现能力硬隔离。
 
-```text
-Human Ctrl+C ≠ command failed
-Human Ctrl+C ≠ retry
-Human Ctrl+C ≠ continue
-Human Ctrl+C = revoke Agent execution authority
-```
-
-## 安全原则
-
-- Human 操作优先于 Agent 操作。
-- 默认只读；写入必须有明确授权。
-- Human Event Layer 不保存普通按键内容。
-- Bridge 崩溃不得影响用户继续使用 tmux。
-- 日志失败不得阻止 `Ctrl+C` 到达 pane。
-- pane、client、lease generation 都必须显式传递，避免“当前窗口”歧义。
-
-## 实施阶段
-
-### Phase 0：输入来源 PoC
-
-已完成：tmux client `Ctrl+C` 与 `send-keys C-c` 来源分流。
-
-### Phase 1：只读 Bridge
-
-- pane discovery
-- active/selected pane resolution
-- bounded `capture-pane`
-- structured terminal context
-
-### Phase 2：Human Event IPC
-
-- 文件日志替换为 Unix domain socket
-- 结构化事件 schema
-- 重连、顺序号和消费者确认
-
-### Phase 3：受控输入
-
-- execution lease
-- command/input API
-- Human interrupt revocation
-- stale generation rejection
-
-### Phase 4：命令事件
-
-- command start/exit
-- exit code
-- prompt/host/current directory
-- 输出区间与命令关联
+开发从 [代码地图](../development/code-structure.md) 进入，验收见 [验证目录](../validation/README.md)，未完成能力见 [路线图](../roadmap.md)，设计演进见 [历史目录](../history/README.md)。

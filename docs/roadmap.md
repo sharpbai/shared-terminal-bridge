@@ -22,7 +22,7 @@
 ## P1：远程生命周期与恢复
 
 - 覆盖 SSH 断线、RDC transport 断线、MCP cancellation、daemon restart 和 tmux server restart 的组合回归。
-- 等待取消只结束观察；终止命令仍需独立、显式并校验 generation。
+- 等待取消只结束观察；终止命令通过独立 job 中断，Core 内部校验原任务授权。
 - 状态未知的写操作不自动重放，使用稳定 job/action identity 返回已有结果或要求人工确认。
 
 完成标准：断线和重连不会重复副作用，也不会把“停止等待”误当成“停止命令”。
@@ -31,16 +31,16 @@
 
 - 分别基准测试冷启动首检、长扫描、写入后验证、TUI fallback 和远程 STB-RDC。
 - `output_complete=true` 后不再追加无意义 status；长任务优先一次本地长等待。
-- 减少重复 Skill/schema 和完整 scrollback，稳定事实进入有界 task digest。
+- 不重复读取已知契约、文档和完整 scrollback，稳定事实进入有界 task digest；STB 已移除 skill 依赖。
 - 使用历史 Job 估计同类任务耗时，但不取消 high I/O 和 full scan 的人工批准。
 
 完成标准：在不降低安全边界和证据质量的前提下，减少模型轮数、等待采样和上下文 Token。
 
 ## P1：Task Block 演进
 
-- 保持 `terminal_task_block` 只记录目标、证据、风险、预算和 observation cursor。
+- 内部 Task Block 保持只记录目标、证据、风险、预算和 observation cursor；不重新暴露已移除的模型计数接口。
 - 写入批准只绑定单个 step，之后以独立只读 step 验证。
-- 使用稳定的 `task_block_id + step_id + generation` 复用已完成结果和运行中的 Job。
+- 内部使用稳定任务/步骤身份及授权校验复用结果；模型继续使用逻辑请求 ID 和 job ID，不读取 generation。
 - 由 Bridge 确定性检测循环、重复错误和空增量，仅在需要语义判断时唤醒模型。
 
 完成标准：复杂任务可恢复、可审计，并且不会因为重试而重复有副作用的步骤。

@@ -4,7 +4,7 @@
 
 ## 自动化回归
 
-最近记录：[2026-10-18 执行状态、授权与命令传输调整](2026-10-18-state-and-transport.md)，含本地测试和 Bridge 重启加载证据。
+最近记录：[2026-10-19 任务接口、自发现与 v0.16.0 发布](../history/changes/2026-10-19-model-api-release.md)，含最终测试与发布证据；前序 [2026-10-18 调整过程](../history/changes/2026-10-18-state-and-transport.md)保留阶段快照，不作为当前接口。
 
 运行完整测试：
 
@@ -19,6 +19,8 @@ python3 -m unittest discover -s tests -p 'test_*_baseline.py'
 ```
 
 ## 已验证能力
+
+下表多数记录来自早期分阶段 PoC，保留当时的 lease/generation 和测试数量；它们是专项历史证据，不是 v0.16.0 的模型调用教程。当前模型只使用 [run/job 接口](../reference/model-tasks.md)，当前完整测试入口见 [测试分层](../development/testing.md)。
 
 | 能力 | 结论 | 记录 |
 | --- | --- | --- |
