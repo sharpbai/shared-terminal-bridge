@@ -25,9 +25,12 @@ TOOLS = [
          "jobs cannot target a newer task. Use a unique request_id for input retry protection.",
          {"job_id": JOB, "request_id": ID, "text": {"type": "string"},
           "key": {"type": "string", "minLength": 1}}, ["job_id", "request_id"]),
-    tool("terminal_interrupt_job", "Send Agent Ctrl+C to this executing job only. "
-         "Never impersonates a Human Event or targets a newer task.",
-         {"job_id": JOB}, ["job_id"]),
+    tool("terminal_interrupt_job", "Send Agent Ctrl+C to this job and wait for prompt return "
+         "in the same call (default 600000ms, optional wait_ms). "
+         "Never impersonates a Human Event or targets a newer task. accepted means the key "
+         "was requested, not process exit. Check termination_confirmed and job status; "
+         "if false, keep observing and do not submit another command.",
+         {"job_id": JOB, "wait_ms": {"type": "integer", "minimum": 1, "maximum": 600000}}, ["job_id"]),
     tool("terminal_approve_request", "Only after explicit human approval of the exact "
          "displayed resource request, approve its request_id. Does not execute it. "
          "Core resolves authority; then use a new run ID with the returned approval_id.",

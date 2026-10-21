@@ -105,6 +105,26 @@ class CommandTransportTest(unittest.TestCase):
             self.assertEqual(submit(core, "echo persisted"), original)
             self.assertEqual(len(core.tmux.typed), 1)
 
+    def test_pane_prompt_survives_task_cleanup_and_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            core = bridge_fixture()
+            core.generations = {'%0': 1}
+            core.tmux_server_id = 'test-server'
+            core.allow_session_management = False
+            core.binding_snapshot_taken = False
+            core.human_binding_installed = False
+            core.original_human_binding = None
+            core.state_file = Path(directory) / 'state.json'
+            core.command_requests = {}
+            core.pane_prompts = {'%0': dict(prompt='root@host:/work#', pane_command='ssh')}
+            del core.persist_state
+            core.jobs.clear()
+            core.persist_state()
+            core.pane_prompts = {}
+            core.load_state()
+            self.assertEqual(core.jobs, {})
+            self.assertEqual(core.pane_prompts['%0']['prompt'], 'root@host:/work#')
+
     def test_concurrent_duplicate_cannot_execute(self):
         core = bridge_fixture()
         entered, release = threading.Event(), threading.Event()

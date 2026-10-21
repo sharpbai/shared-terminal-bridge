@@ -47,11 +47,16 @@ class OrderedEventsHostTest(unittest.TestCase):
             self.assertEqual(job['completion_confidence'], 'ordered_prompt_returned')
             second = bridge.terminal_submit('%0', 1, 'sleep 60', 60000)
             until(lambda: backend.state('%0')['current_command'] == 'sleep')
+            backend.run('copy-mode', '-t', '%0')
+            copy_binding = shlex.split(backend.run('list-keys', '-T', 'copy-mode', 'C-c').stdout)
+            key_command = copy_binding[copy_binding.index('C-c') + 1:]
             with bridge.lock:
                 backend.run(*key_command)
                 until(lambda: backend.state('%0')['current_command'] == 'bash')
             until(lambda: bridge.leases['%0']['state'] == 'REVOKED')
             self.assertEqual(bridge.jobs[second['job_id']]['execution_phase'], 'INTERRUPTED')
+            self.assertEqual(backend.run('display-message', '-p', '-t', '%0',
+                '#{pane_in_mode}').stdout.strip(), '1')
             until(lambda: backend.state('%0')['current_command'] == 'bash')
             renewed = bridge.dispatch('terminal_submit', dict(
                 pane='%0', generation=1, text='sleep 60', expected_duration_ms=60000))

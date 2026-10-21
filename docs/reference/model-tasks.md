@@ -16,6 +16,10 @@ run 传 pane（RDC 可传 session）、唯一逻辑请求 ID、单行命令、�
 
 默认响应和错误会隐藏内部授权元数据，但不改写命令和输出字符串。raw Core socket、人工管理 CLI 与审计属于内部诊断面，不是模型契约。
 
+Agent 中断默认“发 Ctrl+C 并等待提示符返回”，不要求模型补一次 wait。可选 `wait_ms` 为 1–600000，默认 600000；Core 将来源纳入有序流，提示符确认后以 `INTERRUPTED_BY_AGENT` 返回有界输出，不撤销人工权限。`accepted` 仅表示请求发键，`termination_confirmed` 才表示已观察到结束。
+
+等待超时、取消或事件断流不代表进程已退出；未确认时保持原任务占用，按 job ID 观察，不能盲目提交新命令。不自动升级 kill、不补发按键、不注入探测命令。MCP cancellation 仅取消等待；进入 Core 前已取消则不发键。`input` 的 `key=C-c` 共享来源记录但仍是低层发键操作，中断并等待应使用专用 interrupt 工具。
+
 ## 已移除的模型契约
 
 不再发布 acquire、submit、type、key、基于 pane/计数的 interrupt 或带授权参数的 Task Block 工具。RDC 不再接受 lease/submit 或原有审批传参；CLI lease/send 移除。旧调用报错，不偷偷补参数，也不降级兼容。

@@ -53,7 +53,11 @@ class ModelTaskCallsTest(unittest.TestCase):
                            ("terminal_input_job", {"job_id": "one", "request_id": "input-1", "text": "yes"})]:
             result = self.call(server, name, args)
             self.assertFalse(result["result"]["isError"])
-            self.assertEqual(bridge.calls[-1], (name, args))
+            called_name, forwarded = bridge.calls[-1]
+            self.assertEqual(called_name, name)
+            if name == 'terminal_interrupt_job':
+                self.assertTrue(forwarded.pop('wait_id').startswith('wait_'))
+            self.assertEqual(forwarded, args)
 
     def test_bridge_rejection_is_tool_error_without_internal_metadata(self):
         bridge = FakeBridgeV9({"ok": False, "error": {"code": "EXECUTION_LEASE_INVALID",
@@ -65,7 +69,8 @@ class ModelTaskCallsTest(unittest.TestCase):
 
     def test_cancel_notification_wakes_wait_or_run_without_interrupt(self):
         for tool_name, arguments in [("terminal_wait_job", {"job_id": "one"}),
-                                     ("terminal_run", {"pane": "%0", "request_id": "run", "text": "sleep 60"})]:
+                                     ("terminal_run", {"pane": "%0", "request_id": "run", "text": "sleep 60"}),
+                                     ("terminal_interrupt_job", {"job_id": "one"})]:
             class BlockingBridge(FakeBridgeV9):
                 def __init__(self):
                     super().__init__()
@@ -92,4 +97,5 @@ class ModelTaskCallsTest(unittest.TestCase):
             worker.join(2)
             self.assertFalse(worker.is_alive())
             self.assertEqual(result[0]["result"]["structuredContent"]["result"]["state"], "WAIT_CANCELLED")
-            self.assertFalse(any("interrupt" in name for name, _ in bridge.calls))
+            self.assertEqual(sum(name == 'terminal_interrupt_job' for name, _ in bridge.calls),
+                             int(tool_name == 'terminal_interrupt_job'))

@@ -22,10 +22,11 @@ class DynamicPromptHostTest(unittest.TestCase):
             with tempfile.TemporaryDirectory(prefix="stb-prompt-") as folder:
                 destination = pathlib.Path(folder) / "中文目录"
                 destination.mkdir()
+                shell = shutil.which('bash') or '/bin/bash'
                 # Test fixture only: a clean shell with a known dynamic cwd
                 # prompt. Production code never sets PS1 or injects markers.
                 backend.run("new-session", "-d", "-s", "prompt-test", "-x", "45", "-y", "24",
-                            "env PS1='STB:\\W # ' /bin/bash --noprofile --norc -i")
+                            "env PS1='stb@host:\\W # ' " + shell + " --noprofile --norc -i")
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline:
                     content = backend.read("%0", 200)
@@ -49,8 +50,23 @@ class DynamicPromptHostTest(unittest.TestCase):
                 waited = bridge.terminal_wait_job(job_id, wait_ms=100)
                 self.assertEqual(waited["state"], "COMPLETED")
                 self.assertIn("COMMAND_DONE", waited["output_excerpt"]["content"])
-                self.assertIn("STB:中文目录 #", waited["output_excerpt"]["content"])
+                self.assertIn("stb@host:中文目录 #", waited["output_excerpt"]["content"])
                 self.assertNotIn(command, waited["output_excerpt"]["content"])
+                # No newline between application output and the readline prompt.
+                version = subprocess.run([shell, '-c', 'echo ${BASH_VERSINFO[0]}'],
+                                         capture_output=True, text=True, check=True)
+                if int(version.stdout.strip()) < 5:
+                    self.skipTest('no-newline boundary requires modern readline (bash 5+)')
+                for text in ("printf wait_woken", "printf NEXT_OK"):
+                    result = bridge.dispatch('terminal_run', dict(pane='%0',
+                        request_id=text, text=text, wait_ms=3000))
+                    self.assertEqual(result['state'], 'COMPLETED', result)
+                    self.assertEqual(bridge.jobs[result['job_id']]['returned_prompt'],
+                                     'stb@host:中文目录 #')
+                    # Simulate both task cleanup and a pre-cache installation:
+                    # the next screen baseline still contains the last output.
+                    bridge.jobs.clear()
+                    bridge.pane_prompts.clear()
         finally:
             if 'bridge' in locals():
                 bridge.close_terminal_streams()

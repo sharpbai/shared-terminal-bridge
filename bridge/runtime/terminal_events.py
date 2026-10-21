@@ -5,8 +5,9 @@ import threading
 from bridge.common import BridgeError, now
 from bridge.context_policy import AIContextPolicy
 from bridge.execution.lifecycle import EXECUTING, FINISHED, execution_phase
-from bridge.prompt_detection import same_prompt_family
+from bridge.prompt_detection import returned_prompt
 from bridge.tmux.control_stream import ControlStream
+from bridge.tmux.pager import update_cycle, end_status
 
 
 class TerminalEventService:
@@ -74,9 +75,17 @@ class TerminalEventService:
                 return
             if event['type'] == 'command_started':
                 job['stream_epoch'] = epoch
+                job['event_stream_pending'] = False
             if job.get('stream_epoch') != epoch:
                 return
             job['last_stream_seq'] = seq
+            if event['type'] == 'agent_interrupt_requested':
+                if execution_phase(job) == EXECUTING:
+                    job.update(agent_interrupt_requested_at=now(),
+                               agent_interrupt_id=event['interrupt_id'],
+                               state='RUNNING', attention_reason=None)
+                    self.bridge.persist_state()
+                return
             if event['type'] == 'stream_lost':
                 job['event_stream_lost'] = True
                 if execution_phase(job) == EXECUTING:
@@ -90,14 +99,23 @@ class TerminalEventService:
                 return
             if event['type'] == 'terminal_output' and execution_phase(job) == EXECUTING:
                 content = event['content']
+                chunk = event.get('output_chunk')
+                if chunk is None:
+                    previous = job.get('last_content', '')
+                    chunk = content[len(previous):] if content.startswith(previous) else content
+                cycle = update_cycle(job, chunk)
+                already_exited = job.get('pager_exit_cycle') == cycle
                 job['last_content'] = content
                 job['last_activity_at'] = now()
                 job['output_excerpt'] = AIContextPolicy.job_output(
                     job['baseline_content'], content, job['command'])
-                lines = AIContextPolicy.normalize(content)
-                tail = next((line.strip() for line in reversed(lines) if line.strip()), '')
-                if same_prompt_family(job.get('baseline_prompt', ''), tail):
-                    job.update(state='COMPLETED', execution_phase=FINISHED,
+                prompt = returned_prompt(job.get('baseline_prompt', ''), content)
+                if prompt:
+                    job['returned_prompt'] = prompt
+                    self.bridge.pane_prompts[pane] = dict(
+                        prompt=prompt, pane_command=job.get('baseline_pane_command'))
+                    job.update(state=('INTERRUPTED_BY_AGENT' if job.get('agent_interrupt_requested_at')
+                                      else 'COMPLETED'), execution_phase=FINISHED,
                                completion_confidence='ordered_prompt_returned', completed_at=now())
                     self.bridge.persist_state()
                     self.bridge._signal_job_waits(job['job_id'], job['state'])
@@ -105,6 +123,24 @@ class TerminalEventService:
                                        state=job['state'], stream_epoch=epoch, stream_seq=seq)
                     threading.Thread(target=self.bridge._notify_job, args=(job,), daemon=True).start()
                 else:
+                    lines = [line.strip() for line in AIContextPolicy.normalize(content) if line.strip()]
+                    if (not already_exited
+                            and hasattr(self.bridge.tmux, 'pager_at_end')
+                            and self.bridge.tmux.pager_at_end(pane, lines, content, job['command'])):
+                        self.bridge.require_lease(pane, job['generation'])
+                        job['pager_exit_requested'] = True
+                        job['pager_exit_cycle'] = cycle
+                        job['pager_exit_count'] = job.get('pager_exit_count', 0) + 1
+                        self.bridge.persist_state()
+                        self.bridge.tmux.send_text(pane, 'q')
+                        self.bridge.record('AGENT_PAGER_EXIT', pane=pane,
+                                           job_id=job['job_id'], source='agent', pager_cycle=cycle)
+                        return
+                    if lines and end_status(lines[-1]) and not already_exited:
+                        job.update(state='NEEDS_ATTENTION', attention_reason='pager_unconfirmed')
+                        self.bridge.persist_state()
+                        self.bridge._signal_job_waits(job['job_id'], job['state'])
+                        return
                     prompt = self.bridge._interaction_prompt(job['output_excerpt']['content'])
                     if prompt:
                         job.update(state='NEEDS_ATTENTION', attention_reason=prompt)

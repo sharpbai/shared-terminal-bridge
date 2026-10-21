@@ -29,7 +29,10 @@ INSTRUCTIONS = (
     "TTY changes or hidden environment probes. "
     "Use bounded output/deltas, don't re-read after a complete run result. For known "
     "TUI programs prefer terminal_program_profile and their CLI; otherwise ask for "
-    "human assistance before costly Agent-driven TUI operation."
+    "human assistance before costly Agent-driven TUI operation. "
+    "Disable pagers for command output: use git --no-pager ... or GIT_PAGER=cat, "
+    "and systemctl --no-pager ... to avoid getting stuck at (END). "
+    "Bound output where practical; do not change global target configuration."
 )
 
 

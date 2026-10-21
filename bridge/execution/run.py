@@ -35,18 +35,34 @@ class RunService:
         return dict(waited, request_id=request_id,
                     generation=submitted["generation"])
 
-    def terminal_interrupt_job(self, job_id):
-        """Resolve authority from the original job, never from a newer lease."""
+    def terminal_interrupt_job(self, job_id, wait_ms=MAX_JOB_WAIT_MS, wait_id=None):
+        """Request Ctrl+C once, then observe prompt return in the same call."""
+        if type(wait_ms) is not int or not 1 <= wait_ms <= MAX_JOB_WAIT_MS:
+            raise BridgeError("INVALID_JOB_WAIT", wait_ms=wait_ms)
         with self.bridge.lock:
             job = self.bridge.jobs.get(job_id)
             if job is None:
                 raise BridgeError("TERMINAL_JOB_NOT_FOUND", job_id=job_id)
             self.bridge.authorize(job["pane"])
+            if wait_id and wait_id in self.bridge.cancelled_wait_ids:
+                self.bridge.cancelled_wait_ids.discard(wait_id)
+                return dict(job_id=job_id, state='WAIT_CANCELLED', accepted=False,
+                            termination_confirmed=False, task_executed=False)
             if execution_phase(job) != EXECUTING:
                 raise BridgeError("TERMINAL_JOB_NOT_EXECUTING", job_id=job_id)
             self.bridge.require_lease(job["pane"], job["generation"])
             result = self.bridge.terminal_interrupt(job["pane"], job["generation"])
-            return dict(result, job_id=job_id)
+        # Ignore old interaction checkpoints: interruption waits for actual
+        # completion, cancellation, stream failure, or its observation budget.
+        observed = self.bridge.terminal_wait_job(job_id, wait_ms=wait_ms,
+            wait_id=wait_id, _until_finished=True)
+        confirmed = observed.get('state') in {'COMPLETED', 'INTERRUPTED_BY_AGENT'}
+        return dict(observed, **result, job_id=job_id,
+                    termination_confirmed=confirmed,
+                    guidance=("Interrupt observed; inspect the job output before continuing."
+                              if confirmed else
+                              "Ctrl+C requested, but termination is not confirmed. Observe this job; "
+                              "do not submit a new command or claim the process stopped."))
 
     def _admit_and_submit(self, command, authorization=None):
         pane = command["pane"]

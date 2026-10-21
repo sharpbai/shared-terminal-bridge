@@ -2,6 +2,7 @@
 
 import re
 import uuid
+from bridge.execution.lifecycle import EXECUTING, execution_phase
 
 try:
     from bridge.common import BridgeError, now, unix_ms
@@ -354,22 +355,36 @@ class TaskBlockService:
         }
 
     def terminal_key(self, pane: str, generation: int, key: str):
+        if key == "C-c":
+            return self.bridge.terminal_interrupt(pane, generation)
         self.bridge.require_lease(pane, generation)
         self.bridge.tmux.send_key(pane, key)
         self.bridge.record("KEY", pane=pane, generation=generation, key=key)
         return {"accepted": True, "key": key}
 
     def terminal_interrupt(self, pane: str, generation: int):
-        self.bridge.require_lease(pane, generation)
-        self.bridge.tmux.send_key(pane, "C-c")
         interrupt_id = uuid.uuid4().hex
         with self.bridge.lock:
+            self.bridge.require_lease(pane, generation)
+            job = next((j for j in self.bridge.jobs.values()
+                        if j['pane'] == pane and j['generation'] == generation
+                        and execution_phase(j) == EXECUTING), None)
+            stream = self.bridge.ensure_terminal_stream(pane) if job else None
+            if stream is not None:
+                stream.interrupt(job['job_id'], generation, interrupt_id)
+            else:
+                if job:
+                    job.update(agent_interrupt_requested_at=now(),
+                               agent_interrupt_id=interrupt_id, state='RUNNING',
+                               attention_reason=None)
+                self.bridge.tmux.send_key(pane, "C-c")
             self.bridge.interrupt_sources[pane] = {
                 "source": "agent",
                 "interrupt_id": interrupt_id,
                 "generation": generation,
                 "timestamp": now(),
             }
+            self.bridge.persist_state()
         self.bridge.record(
             "AGENT_INTERRUPT",
             pane=pane,

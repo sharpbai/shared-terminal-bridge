@@ -78,6 +78,41 @@ class TerminalEventOrderTest(unittest.TestCase):
             self.bridge.terminal_submit('%0', 1, 'echo NEXT', 1000)
         self.assertEqual(error.exception.code, 'TERMINAL_JOB_ALREADY_RUNNING')
 
+    def test_missing_start_confirmation_is_bounded_and_never_replayed(self):
+        from bridge.common import unix_ms
+        self.job.pop('stream_epoch', None)
+        self.job['event_stream_pending'] = True
+        self.job['submitted_at_ms'] = unix_ms() - 6000
+        self.bridge.terminal_job_status(self.job['job_id'])
+        self.assertEqual(self.job['attention_reason'], 'command_start_unconfirmed')
+        self.assertEqual(self.job['execution_phase'], 'EXECUTING')
+
+    def test_start_ack_clears_pending(self):
+        self.assertFalse(self.job['event_stream_pending'])
+
+    def test_pager_key_once_per_lifetime_not_per_output_or_job(self):
+        from unittest.mock import Mock
+        self.bridge.tmux.pager_at_end = Mock(return_value=True)
+        self.emit('terminal_output', content='(END)', output_chunk='\x1b[?1049h(END)')
+        self.emit('terminal_output', content='(END)', output_chunk='(END)')
+        self.assertEqual(self.bridge.tmux.typed.count(('%0', 'q')), 1)
+        self.emit('terminal_output', content='(END)',
+                  output_chunk='\x1b[?1049l\x1b[?1049h(END)')
+        self.assertEqual(self.bridge.tmux.typed.count(('%0', 'q')), 2)
+
+    def test_human_override_prevents_automatic_pager_input(self):
+        from unittest.mock import Mock
+        self.bridge.tmux.pager_at_end = Mock(return_value=True)
+        self.emit('human_interrupt')
+        self.emit('terminal_output', content='\x1b[7m(END)\x1b[m')
+        self.bridge.tmux.pager_at_end.assert_not_called()
+        self.assertNotIn(('%0', 'q'), self.bridge.tmux.typed)
+
+    def test_end_text_without_pager_evidence_is_not_a_key(self):
+        self.emit('terminal_output', content='text\n(END)')
+        self.assertEqual(self.job['attention_reason'], 'pager_unconfirmed')
+        self.assertNotIn(('%0', 'q'), self.bridge.tmux.typed)
+
     def test_control_parser_joins_split_unicode_prompt(self):
         self.assertEqual(decode_output(br'\003\134u0003'), b'\x03\\u0003')
         events = []
@@ -87,7 +122,7 @@ class TerminalEventOrderTest(unittest.TestCase):
         stream.scope, stream.tail = None, ''
         stream.decoder = codecs.getincrementaldecoder('utf-8')('replace')
         stream.callback = events.append
-        stream._line(b'%message STB_START %0 job_test 1\n')
+        stream._line(b'STB_START %0 job_test 1\n')
         stream._line(b'%output %0 done\\015\\012pro\n')
         stream._line(b'%output %0 mpt$ \n')
         stream._line(b'%message STB_INTERRUPT %0 client\n')

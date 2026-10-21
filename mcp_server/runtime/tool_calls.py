@@ -105,7 +105,7 @@ class ToolCallService:
             bridge_response = self.server.acquire_session(
                 arguments["name"], request_meta=params.get("_meta") or {}
             )
-        elif name in {"terminal_wait_job", "terminal_run"}:
+        elif name in {"terminal_wait_job", "terminal_run", "terminal_interrupt_job"}:
             if name == "terminal_run" and arguments.get("resource_class") in {"high_io", "full_scan"}:
                 turn = self.server.turn_resolver.from_request(params.get("_meta") or {})
                 if turn:
@@ -116,7 +116,7 @@ class ToolCallService:
                 cancelled_early = request_id in self.server.cancelled_requests
                 self.server.cancelled_requests.discard(request_id)
             if cancelled_early:
-                if name == "terminal_run":
+                if name in {"terminal_run", "terminal_interrupt_job"}:
                     with self.server.request_lock:
                         self.server.request_wait_ids.pop(request_id, None)
                     return self.server.tool_result({"ok": True, "result": {

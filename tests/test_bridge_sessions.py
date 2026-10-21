@@ -51,13 +51,11 @@ class ContextBridgeTest(unittest.TestCase):
         tmux.submit("%0", "printf ok")
 
         self.assertEqual(len(calls), 1)
-        self.assertEqual(
-            calls[0],
-            (
-                "send-keys", "-t", "%0", "-l", "printf ok",
-                ";", "send-keys", "-t", "%0", "Enter",
-            ),
-        )
+        command = calls[0]
+        self.assertEqual(command[:2], ('set-buffer', '-b'))
+        self.assertEqual(command[3:8], ('--', 'printf ok\r', ';', 'paste-buffer', '-d'))
+        self.assertEqual(command[-2:], ('-t', '%0'))
+        self.assertEqual(command[2], command[-3])
 
 
 if __name__ == "__main__":

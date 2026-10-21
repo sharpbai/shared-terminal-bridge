@@ -14,6 +14,7 @@ import uuid
 
 from bridge.common import BridgeError
 from bridge.runtime.admission import receive
+from bridge.tmux.pane_input import text_commands, key_commands
 
 
 def decode_output(value):
@@ -57,14 +58,19 @@ class ControlStream:
                            _received=receive(), **values))
 
     def _line(self, line):
+        # Command responses are reliable even when transient client messages
+        # are suppressed. Both forms remain readable for old recorded streams.
+        if line.startswith((b'STB_START ', b'STB_AGENT_INTERRUPT ')):
+            line = b'%message ' + line
         if line.startswith(b'%session-changed '):
             self.ready.set()
         elif line.startswith(b'%output '):
             parts = line.rstrip(b'\n').split(b' ', 2)
             if len(parts) != 3 or parts[1].decode() != self.pane:
                 return
-            self.tail = (self.tail + self.decoder.decode(decode_output(parts[2])))[-32768:]
-            self._emit('terminal_output', content=self.tail)
+            chunk = self.decoder.decode(decode_output(parts[2]))
+            self.tail = (self.tail + chunk)[-32768:]
+            self._emit('terminal_output', content=self.tail, output_chunk=chunk)
         elif line.startswith(b'%message STB_START '):
             parts = line.decode().strip().split()
             if len(parts) != 5 or parts[2] != self.pane:
@@ -77,6 +83,11 @@ class ControlStream:
             parts = line.decode().strip().split()
             if len(parts) >= 3 and parts[2] == self.pane:
                 self._emit('human_interrupt', client=parts[3] if len(parts) > 3 else '')
+        elif line.startswith(b'%message STB_AGENT_INTERRUPT '):
+            parts = line.decode().strip().split()
+            if (len(parts) == 6 and parts[2] == self.pane
+                    and self.scope == dict(job_id=parts[3], generation=int(parts[4]))):
+                self._emit('agent_interrupt_requested', interrupt_id=parts[5])
         elif line.startswith((b'%pause ', b'%exit', b'%error ')):
             raise RuntimeError('control stream lost continuity')
 
@@ -98,11 +109,9 @@ class ControlStream:
         if self.closed.is_set():
             raise BridgeError('TERMINAL_EVENT_STREAM_UNAVAILABLE', pane=self.pane)
         commands = [
-            ['display-message', '-l', '-c', self.client,
+            ['display-message', '-p', '-l',
              f'STB_START {self.pane} {job_id} {generation}'],
-            ['send-keys', '-t', self.pane, '-l', text],
-            ['send-keys', '-t', self.pane, 'Enter'],
-        ]
+        ] + text_commands(self.pane, text + '\r')
         payload = ' ; '.join(' '.join(shlex.quote(x) for x in cmd) for cmd in commands) + '\n'
         with self.write_lock:
             try:
@@ -130,3 +139,19 @@ class ControlStream:
             self.reader.join(timeout=2)
         for file in (self.process.stdin, self.process.stdout):
             file.close()
+
+    def interrupt(self, job_id, generation, interrupt_id):
+        """Order request provenance before the key and its resulting output."""
+        if self.closed.is_set():
+            raise BridgeError('TERMINAL_EVENT_STREAM_UNAVAILABLE', pane=self.pane)
+        commands = [
+            ['display-message', '-p', '-l',
+             f'STB_AGENT_INTERRUPT {self.pane} {job_id} {generation} {interrupt_id}'],
+        ] + key_commands(self.pane, 'C-c')
+        payload = ' ; '.join(' '.join(shlex.quote(x) for x in cmd) for cmd in commands) + '\n'
+        with self.write_lock:
+            try:
+                self.process.stdin.write(payload.encode())
+                self.process.stdin.flush()
+            except (OSError, ValueError) as error:
+                raise BridgeError('TERMINAL_EVENT_STREAM_UNAVAILABLE', pane=self.pane) from error

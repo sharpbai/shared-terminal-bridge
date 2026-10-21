@@ -12,7 +12,7 @@ DEFAULT_EVENT_SOCKET = pathlib.Path("/tmp/shared-terminal-events.sock")
 DEFAULT_STATE_FILE = pathlib.Path("/tmp/shared-terminal-bridge-state.json")
 DEFAULT_HISTORY_FILE = pathlib.Path.home() / ".local/state/shared-terminal-bridge/history.jsonl"
 BRIDGE_API_VERSION = 9
-BRIDGE_VERSION = "0.16.0"
+BRIDGE_VERSION = "0.17.0"
 DEFAULT_WAIT_MS = 10_000
 DEFAULT_IDLE_BUDGET_MS = 30_000
 DEFAULT_TOTAL_BUDGET_MS = 60_000
@@ -27,6 +27,7 @@ JOB_PROMPT_STABLE_MS = 1_500
 REMOTE_TRANSPORT_COMMANDS = {"ssh", "mosh", "telnet"}
 JOB_TERMINAL_STATES = {
     "COMPLETED",
+    "INTERRUPTED_BY_AGENT",
     "INTERRUPTED_BY_HUMAN",
     "NEEDS_ATTENTION",
     "HUMAN_DECISION_REQUIRED",

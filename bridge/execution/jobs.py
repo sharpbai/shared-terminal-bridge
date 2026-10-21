@@ -66,6 +66,13 @@ class JobService:
     ):
         job_id = f"job_{uuid.uuid4().hex[:12]}"
         submitted_at_ms = unix_ms()
+        baseline_prompt = self.bridge._last_nonempty_line(baseline)
+        # capture-pane has no ANSI boundary. Reuse only the last confirmed
+        # prompt when it is still the visible screen suffix, never stale history.
+        confirmed = self.bridge.pane_prompts.get(pane)
+        if (confirmed and confirmed.get('pane_command') == baseline_pane_command
+                and baseline_prompt.endswith(confirmed['prompt'])):
+            baseline_prompt = confirmed['prompt']
         job = {
             "job_id": job_id,
             "pane": pane,
@@ -84,7 +91,7 @@ class JobService:
             ),
             "strategy_review_at_ms": submitted_at_ms + 10 * 60 * 1000,
             "baseline_content": baseline,
-            "baseline_prompt": self.bridge._last_nonempty_line(baseline),
+            "baseline_prompt": baseline_prompt,
             "baseline_pane_command": baseline_pane_command,
             "last_content": baseline,
             "last_change_ms": submitted_at_ms,
@@ -184,6 +191,9 @@ class JobService:
             for line in AIContextPolicy.normalize(observation["content"])
             if line.strip() and not line.strip().endswith(job["command"].strip())
         ][-5:]
+        last_line = self.bridge._last_nonempty_line(current)
+        if job.get('agent_interrupt_requested_at'):
+            last_line = last_line.removeprefix('^C').lstrip()
         return {
             "pane_command": pane_command,
             "output_excerpt": output_excerpt,
@@ -196,7 +206,7 @@ class JobService:
             # Prompt detection is job-local. A generic delta can contain stale
             # pane history after scrollback shifts and must not trigger it.
             "prompt": self.bridge._interaction_prompt(output_excerpt["content"]),
-            "last_line": self.bridge._last_nonempty_line(current),
+            "last_line": last_line,
             "evidence_lines": evidence_lines,
         }
 
@@ -230,7 +240,8 @@ class JobService:
             and current != baseline
             and current_ms - job["last_change_ms"] >= JOB_PROMPT_STABLE_MS
         ):
-            job["state"] = "COMPLETED"
+            job["state"] = ("INTERRUPTED_BY_AGENT" if job.get("agent_interrupt_requested_at")
+                            else "COMPLETED")
             job["completion_confidence"] = "prompt_returned"
             job["completed_at"] = now()
         elif current_ms >= job["hard_deadline_ms"]:
@@ -259,6 +270,13 @@ class JobService:
             if job is None:
                 raise BridgeError("TERMINAL_JOB_NOT_FOUND", job_id=job_id)
             if job.get('event_stream_pending') or job.get('stream_epoch'):
+                if (job.get('event_stream_pending') and job['state'] == 'RUNNING'
+                        and unix_ms() - job['submitted_at_ms'] >= 5000):
+                    job.update(state='NEEDS_ATTENTION', attention_reason='command_start_unconfirmed',
+                               event_stream_lost=True)
+                    self.bridge.persist_state()
+                    self.bridge._signal_job_waits(job_id, job['state'])
+                    return job
                 # Output/key ordering belongs exclusively to the control
                 # stream. A later capture here must not overtake a queued key.
                 if (job['state'] == 'RUNNING'
@@ -326,9 +344,11 @@ class JobService:
                 "strategy_review_at_ms", "last_activity_at", "progress",
                 "last_meaningful_activity_at", "last_evidence_lines",
                 "attention_reason", "completed_at", "output_excerpt",
+                "agent_interrupt_requested_at", "agent_interrupt_id",
             )
         }
         result["elapsed_ms"] = max(0, current_ms - job["submitted_at_ms"])
+        result['execution_phase'] = execution_phase(job)
         result["hard_deadline_remaining_ms"] = max(
             0, job["hard_deadline_ms"] - current_ms
         )
@@ -340,6 +360,7 @@ class JobService:
         result["recommended_action"] = {
             "COMPLETED": "CONTINUE",
             "INTERRUPTED_BY_HUMAN": "STOP_CURRENT_EXECUTION_CHAIN",
+            "INTERRUPTED_BY_AGENT": "INSPECT",
             "NEEDS_ATTENTION": "MODEL_OR_HUMAN_DECISION",
             "HUMAN_DECISION_REQUIRED": "HUMAN_DECISION",
             "RUNNING": "WAIT",

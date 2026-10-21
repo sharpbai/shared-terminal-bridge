@@ -24,7 +24,7 @@ python3 mcp_server/server.py --enable-actions --enable-session-management
 
 ## 等待和取消
 
-run 和 terminal_wait_job 都使用可取消的本地等待。默认最多 600000ms；Core 的检查点语义不变。MCP notifications/cancelled 唤醒等待，不发送终端 Ctrl+C。run 尚未进入 Core 就被取消时不提交命令。
+run、terminal_wait_job 和 terminal_interrupt_job 都使用可取消的本地等待，默认最多 600000ms。interrupt 发一次 Ctrl+C 后等待提示符，不把旧交互检查点视为结束；超时、取消或断流没有退出确认时继续保留任务占用。MCP notifications/cancelled 仅唤醒观察等待，不补发终端 Ctrl+C；run/interrupt 尚未进入 Core 就被取消时不提交命令或按键。
 
 Human Ctrl+C 仅在执行中的任务上取消旧链。新 run 以本地接收顺序授权；同 ID 重试只观察原 job，不能恢复旧执行链。未知 pane、旧 job、冲突 ID 和崩溃不确定状态仍拒绝。
 

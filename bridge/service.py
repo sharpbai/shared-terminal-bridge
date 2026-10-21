@@ -6,9 +6,9 @@ SERVICE_DEPENDENCIES = {
                     "terminal_key", "_submit_once", "_long_run_request", "leases",
                     "acquire_execution", "terminal_long_run_approve"},
     "run": {"_submit_once", "terminal_wait_job", "authorize", "lock", "leases",
-            "acquire_execution", "terminal_submit", "jobs", "require_lease", "terminal_interrupt", "persist_state"},
+            "acquire_execution", "terminal_submit", "jobs", "require_lease", "terminal_interrupt", "persist_state", "cancelled_wait_ids"},
     "terminal_events": {
-        "tmux", "lock", "jobs", "record", "persist_state",
+        "tmux", "lock", "jobs", "pane_prompts", "require_lease", "record", "persist_state",
         "handle_human_event", "_signal_job_waits",
         "_interaction_prompt",
         "_notify_job",
@@ -19,7 +19,7 @@ SERVICE_DEPENDENCIES = {
         "instance_lock_file", "instance_lock_path", "jobs", "leases",
         "long_run_requests", "managed_sessions", "original_human_binding",
         "persist_state", "persistent_state", "state_file", "tmux",
-        "tmux_server_id", "command_requests",
+        "tmux_server_id", "command_requests", "pane_prompts",
     },
     "audit": {"audit", "history_file", "lock", "managed_sessions"},
     "human_events": {
@@ -57,7 +57,7 @@ SERVICE_DEPENDENCIES = {
     "jobs": {
         "_command_fingerprint", "_history_command", "_interaction_prompt",
         "_job_hard_deadline_ms", "_last_nonempty_line", "_notify_job",
-        "_refresh_job", "_signal_job_waits", "jobs", "leases", "lock",
+        "_refresh_job", "_signal_job_waits", "jobs", "pane_prompts", "leases", "lock",
         "persist_state", "record", "stop_event", "tmux",
     },
     "job_wait": {
@@ -73,7 +73,7 @@ SERVICE_DEPENDENCIES = {
         "_compact_task_excerpt", "_task_assertion", "_validate_read_only_command",
         "authorize", "interrupt_sources", "leases", "lock", "record",
         "require_lease", "task_blocks", "terminal_submit", "terminal_wait_job",
-        "tmux",
+        "tmux", "terminal_interrupt", "jobs", "ensure_terminal_stream", "persist_state",
     },
 }
 

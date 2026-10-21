@@ -1,10 +1,12 @@
 """Job lookup plus cancellable, event-driven wait operations."""
 
 import threading
+import time
 import uuid
 
 from bridge.common import BridgeError, now, unix_ms
 from bridge.config import JOB_TERMINAL_STATES, MAX_JOB_WAIT_MS
+from bridge.execution.lifecycle import EXECUTING, execution_phase
 
 
 class JobWaitService:
@@ -68,6 +70,7 @@ class JobWaitService:
         job_id: str,
         wait_ms: int = MAX_JOB_WAIT_MS,
         wait_id: str = None,
+        _until_finished: bool = False,
     ):
         try:
             wait_ms = int(wait_ms)
@@ -94,16 +97,22 @@ class JobWaitService:
                 handle["wake_reason"] = "WAIT_CANCELLED"
                 event.set()
         try:
-            job = self.bridge._refresh_job(job_id)
-            if job["state"] in JOB_TERMINAL_STATES:
-                result = self.bridge._job_result(job, include_output=False)
-                result["wait_id"] = wait_id
-                return result
-            event.wait(wait_ms / 1000)
-            job = self.bridge._refresh_job(job_id)
+            deadline = time.monotonic() + wait_ms / 1000
+            def settled(job):
+                return (execution_phase(job) != EXECUTING if _until_finished
+                        else job['state'] in JOB_TERMINAL_STATES)
+            while True:
+                event.clear()
+                job = self.bridge._refresh_job(job_id)
+                if settled(job) or job.get('event_stream_lost') or handle['cancelled']:
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                event.wait(remaining)
             result = self.bridge._job_result(job, include_output=False)
             result["wait_id"] = wait_id
-            if job["state"] in JOB_TERMINAL_STATES:
+            if settled(job) or job.get('event_stream_lost'):
                 return result
             if handle["cancelled"]:
                 result["state"] = "WAIT_CANCELLED"

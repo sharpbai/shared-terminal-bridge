@@ -1,6 +1,28 @@
 # Changelog
 
-## Unreleased
+## v0.17.0 — 2026-10-21
+
+配套 STB-RDC v0.3.1，Bridge API 保持 v9，run/job 模型入口不变。升级重启 Bridge（撤销租约、保留终端进程），重连 MCP 刷新 schema/instructions。分页判断仍是有界启发式，远端分支测试采用 SSH 进程证据回放，不宣称已覆盖所有远端 Shell。
+
+- 新增 `stb cleanup-tasks`：默认预览，`--yes` 备份并清理未结束任务、重启 Bridge，`--pane` 限定目标；保留提示符缓存及防重放，不终止实际命令。须先确认终端空闲。
+- MCP 和 RDC 自发现提示建议 Git/systemctl 禁用分页并限定输出，不修改目标全局配置。
+- 本次不涉及 Terminal 保活，也不引入 Jev／小模型。SSH 登录中或输入行未就绪的提交检查尚未实现，不将其列为已修复。
+
+- 适配 systemctl 的 `lines 1-N/N (END)` 状态栏，以及 less -X 不使用备用屏幕、仅启用应用键盘模式的远端分页；继续要求前台传输、已知命令和反色视频状态栏证据。
+
+- 分页自动退出按独立 alternate-screen 出现周期去重，而非整个任务一次；按有序新增字节识别退出/重新进入，处理分段转义序列，重复 END/重绘不再次发送 q。同一任务多分页器真实 tmux 回归通过。
+
+- Bridge 内部识别本地及远端分页末尾并安全退出一次，继续等待提示符；证据不足明确返回需检查，不向模型新增操作步骤。开始/Agent 中断标记改用字面 control 命令响应，开始确认缺失 5 秒后有界返回且不重放。增加真实 tmux/less、SSH 证据回放及安全边界回归。
+
+- 已确认提示符独立按 pane 持久化，不随任务清理丢失；仅在当前画面后缀和宿主进程类型一致时复用。首次无缓存且基线被无换行输出污染时，允许在明确 readline 边界恢复基线中已有的完整 user@host:path 提示符。增加任务清理、重启及冷启动回归。
+
+- 修复无换行输出与提示符粘连造成任务持续 RUNNING：在有序输出中结合 readline bracketed-paste-enable 边界与已知提示符识别完成，保存确认后的提示符供下一任务使用；不接受任意文本后缀作为完成证据。
+
+- 内部输入通道：滚屏 copy-mode 下命令文本、回车及 Ctrl+C 直接进入 pane，保留历史浏览位置；人工/Agent 来源、有序中断及授权语义不变。补充真实 tmux 滚屏回归，不增加模型参数。
+
+- terminal_interrupt_job 默认发送 Ctrl+C 后事件驱动等待提示符返回，可选 wait_ms（默认 600000）；MCP 支持取消该观察，前置取消不发键。旧交互检查点不当作结束，超时/取消不释放执行占用，且不自动升级信号。
+
+- Agent Ctrl+C 请求纳入有序事件流，提示符确认后以 INTERRUPTED_BY_AGENT 结束；中断响应区分 accepted 与 termination_confirmed，忽略信号时保留执行占用。修复远端 Shell 的 ^C 回显和 keypad 模式转义影响提示符识别；job input C-c 共享同一来源路径。
 
 - 文档统一按 guides/reference/development/validation/history 分层；按日记录进入 history/changes，重写当前架构、传输与上下文边界，修复旧模型调用说明及手册导航。
 

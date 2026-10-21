@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from bridge.tmux.pane_input import text_commands, key_commands
 
 try:
     from bridge.common import BridgeError, now
@@ -153,17 +154,32 @@ class TmuxBackend:
         raise BridgeError("CLIENT_NOT_FOUND", client=client_name)
 
     def send_text(self, pane: str, text: str):
-        self.run("send-keys", "-t", pane, "-l", text)
+        if text:
+            self._input_commands(text_commands(pane, text))
+
+    def pager_at_end(self, pane, lines, raw='', command=''):
+        from bridge.tmux.pager import at_pager_end
+        tty = self.run('display-message', '-p', '-t', pane, '#{pane_tty}').stdout.strip()
+        return at_pager_end(lines, tty, raw, command)
 
     def send_key(self, pane: str, key: str):
-        self.run("send-keys", "-t", pane, key)
+        commands = key_commands(pane, key)
+        if commands[0][0] == 'send-keys' and self.run(
+                'display-message', '-p', '-t', pane, '#{pane_in_mode}').stdout.strip() == '1':
+            raise BridgeError('TERMINAL_KEY_UNSUPPORTED_IN_COPY_MODE', key=key)
+        self._input_commands(commands)
+
+    def _input_commands(self, commands):
+        arguments = []
+        for command in commands:
+            if arguments:
+                arguments.append(';')
+            arguments.extend(command)
+        self.run(*arguments)
 
     def submit(self, pane: str, text: str):
         """Queue literal text and Enter in one ordered tmux invocation."""
-        self.run(
-            "send-keys", "-t", pane, "-l", text,
-            ";", "send-keys", "-t", pane, "Enter",
-        )
+        self._input_commands(text_commands(pane, text + '\r'))
 
     def list_managed_sessions(self):
         result = self.run(
@@ -329,17 +345,28 @@ class TmuxBackend:
         # Expand the pane-specific buffer name before parsing the command list.
         # The synchronous emitter consumes the snapshot before another key from
         # this client runs; C-c itself is delivered before launching Python.
+        # tmux parses the quoted octal escape; keep binding text printable so
+        # list-keys / restoration round-trips do not change a literal control.
+        human_key = ('set-buffer -b stb-human-interrupt -- "\\003"'
+                     ' ; paste-buffer -d -r -b stb-human-interrupt')
         fallback = (
             "capture-pane -S -30 -b stb-interrupt-#{pane_id} ; "
-            "send-keys C-c ; run-shell " + shlex.quote(emit_command)
+            + human_key + " ; run-shell " + shlex.quote(emit_command)
         )
         ordered = (
             'display-message -l -c "#{@stb_event_client}" '
-            '"STB_INTERRUPT #{pane_id} #{client_name}" ; send-keys C-c'
+            '"STB_INTERRUPT #{pane_id} #{client_name}" ; ' + human_key
         )
         commands = ('if-shell -F "#{@stb_event_client}" '
                     + shlex.quote(ordered) + ' ' + shlex.quote(fallback))
         self.run("bind-key", "-T", "root", "C-c", "run-shell", "-C", commands)
+        for table in ('copy-mode', 'copy-mode-vi'):
+            option = '@stb-original-' + table + '-ctrl-c'
+            snapshot = self.run('show-options', '-gqv', option, check=False).stdout.strip()
+            if not snapshot:
+                original = self.run('list-keys', '-T', table, 'C-c', check=False).stdout.strip()
+                self.run('set-option', '-g', option, original or 'UNBOUND')
+            self.run('bind-key', '-T', table, 'C-c', 'run-shell', '-C', commands)
 
     def ensure_server_identity(self):
         variable = "SHARED_TERMINAL_BRIDGE_SERVER_ID"
@@ -369,8 +396,17 @@ class TmuxBackend:
         return binding or None
 
     def restore_root_ctrl_c_binding(self, binding):
+        for table in ('copy-mode', 'copy-mode-vi'):
+            option = '@stb-original-' + table + '-ctrl-c'
+            original = self.run('show-options', '-gqv', option, check=False).stdout.strip()
+            if original:
+                self._restore_ctrl_c_binding(None if original == 'UNBOUND' else original, table)
+                self.run('set-option', '-gu', option)
+        self._restore_ctrl_c_binding(binding, 'root')
+
+    def _restore_ctrl_c_binding(self, binding, table):
         if binding is None:
-            self.run("unbind-key", "-T", "root", "C-c", check=False)
+            self.run("unbind-key", "-T", table, "C-c", check=False)
             return
 
         temporary_path = None

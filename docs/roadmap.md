@@ -6,7 +6,8 @@
 
 ## 当前基线
 
-- STB v0.16.0 以 run/job ID 提供模型入口，授权计数留在 Core；持久去重保证同 ID 不重复执行。
+- STB v0.17.0 以 run/job ID 提供模型入口，授权计数留在 Core；持久去重保证同 ID 不重复执行。支持内部分页周期退出、滚屏输入隔离、提示符缓存及本地任务状态清理。
+- 待处理：SSH 登录或命令行已有输入时的提交就绪检查；不能将当前提示符启发式视为可信退出码协议。终端保活配置归 Terminal 管理，不作为 STB 特判；Jev／小模型不属于本次发布。
 - 普通授权按本地接收顺序处理；执行期间人工 Ctrl+C 停止旧执行链，新明确调用可续授权，高风险仍批准。开始、输出、人工按键进入有序事件流。
 - Codex 通过本地 MCP 使用 STB；ChatGPT 通过 RDC transport 与 STB-RDC Adapter 使用同一安全状态机。
 - STB-RDC Exclusive Mode 当前由工具说明和 Adapter contract 实现 fail-closed；宿主级能力隔离仍待实现。

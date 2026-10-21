@@ -75,6 +75,9 @@ def _daemon(args):
 
 
 def handle_admin_command(args):
+    if args.command == 'cleanup-tasks':
+        from stb_cli.task_cleanup import cleanup
+        return cleanup(args)
     if args.command == "history":
         _history(args)
         return 0

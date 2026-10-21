@@ -21,6 +21,6 @@ def execution_phase(job):
 def sync_execution_phase(job):
     if job["state"] == "INTERRUPTED_BY_HUMAN":
         job["execution_phase"] = INTERRUPTED
-    elif job["state"] in {"COMPLETED", "FAILED"}:
+    elif job["state"] in {"COMPLETED", "FAILED", "INTERRUPTED_BY_AGENT"}:
         job["execution_phase"] = FINISHED
 

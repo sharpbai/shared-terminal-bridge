@@ -16,7 +16,7 @@ Shared Terminal Bridge（STB）是一个本地优先的交互式终端桥接层�
 
 首次接入可运行 `stb discover --json` 获取机器可读导航，或 `stb mcp` 查看 MCP 全局注册命令与等待超时配置；两者无需 daemon 在线，不修改配置或执行任务。连接后以 MCP instructions/schema 为准，无需 skill。
 
-当前稳定版本为 **v0.16.0 / Bridge API v9**。模型接口统一为 run/job ID，内部处理授权与持久请求去重；终端输出和人工中断纳入有序状态机。增加 MCP/CLI 自发现，不再依赖 skill。旧 acquire/submit/generation 模型契约不兼容；配套 STB-RDC v0.3.0。升级后重启 Bridge 并重新连接 MCP，无需重建 tmux 会话；重启会撤销旧授权。
+当前稳定版本为 **v0.17.0 / Bridge API v9**，配套 STB-RDC v0.3.1。新增滚屏与输入隔离、内部分页退出、提示符基线持久化及本地任务清理；Agent Ctrl+C 默认等待提示符确认。模型仍使用 run/job ID，无需管理内部授权计数。升级后重启 Bridge，并重连 MCP 刷新说明；无需重建 tmux 会话，重启会撤销旧授权。变更与限制见[版本记录](CHANGELOG.md)。
 
 继续保留 STB-RDC Exclusive Mode contract：用户明确选择 STB-RDC 后，RDC 只承担 transport/bootstrap，目标主机操作
 默认必须经过 STB；独立 RDC capability 需要一次性人工旁路批准。该 contract 让当前

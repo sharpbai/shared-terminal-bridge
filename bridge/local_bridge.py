@@ -240,6 +240,7 @@ class LocalBridge:
         self.long_run_requests = {}
         self.long_run_approvals = {}
         self.jobs = {}
+        self.pane_prompts = {}
         self.command_requests = {}
         self.wait_handles = {}
         self.cancelled_wait_ids = set()

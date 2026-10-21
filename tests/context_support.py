@@ -48,6 +48,7 @@ def bridge_fixture():
     bridge.long_run_requests = {}
     bridge.long_run_approvals = {}
     bridge.jobs = {}
+    bridge.pane_prompts = {}
     bridge.wait_handles = {}
     bridge.cancelled_wait_ids = set()
     bridge.interrupt_sources = {}
