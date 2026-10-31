@@ -50,7 +50,7 @@ class IdentityDiagnostics:
             return
         if method not in ("initialize", "server/discover") and not (
             method == "tools/call"
-            and params.get("name") == "terminal_session_acquire"
+            and params.get("name") == "terminal_run"
         ):
             return
         record = {

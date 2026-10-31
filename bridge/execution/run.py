@@ -5,6 +5,8 @@ job; it never reacquires a lease or repeats terminal input. Wait cancellation
 and deadlines retain the existing job/wait semantics.
 """
 
+from uuid import uuid4
+
 from bridge.common import BridgeError
 from bridge.config import DEFAULT_TOTAL_BUDGET_MS, MAX_JOB_WAIT_MS
 from bridge.runtime.admission import received_after_revocation
@@ -15,21 +17,22 @@ class RunService:
     def __init__(self, bridge):
         self.bridge = bridge
 
-    def terminal_run(self, pane, request_id, text,
+    def terminal_run(self, pane, request_id=None, text=None,
                      expected_duration_ms=DEFAULT_TOTAL_BUDGET_MS,
                      resource_class="normal", wait_ms=MAX_JOB_WAIT_MS,
-                     long_run_approval_id=None, wait_id=None, _authorization=None):
+                     wait_id=None):
         # Validate the observation window BEFORE any execution side effect.
         if type(wait_ms) is not int or not 1 <= wait_ms <= MAX_JOB_WAIT_MS:
             raise BridgeError("INVALID_JOB_WAIT", wait_ms=wait_ms)
+        if request_id is None:
+            request_id = "run_" + uuid4().hex
         command = dict(pane=pane, text=text, expected_duration_ms=expected_duration_ms,
-                       resource_class=resource_class,
-                       long_run_approval_id=long_run_approval_id)
+                       resource_class=resource_class)
         # The operation discriminator prevents cross-method ID collisions.
         # wait_ms/wait_id are observation parameters, not a new command.
         submitted = self.bridge._submit_once(
             dict(command, request_id=request_id, operation="terminal_run"),
-            lambda: self._admit_and_submit(command, _authorization))
+            lambda: self._admit_and_submit(command))
         waited = self.bridge.terminal_wait_job(
             submitted["job_id"], wait_ms=wait_ms, wait_id=wait_id)
         return dict(waited, request_id=request_id,
@@ -64,7 +67,7 @@ class RunService:
                               "Ctrl+C requested, but termination is not confirmed. Observe this job; "
                               "do not submit a new command or claim the process stopped."))
 
-    def _admit_and_submit(self, command, authorization=None):
+    def _admit_and_submit(self, command):
         pane = command["pane"]
         self.bridge.authorize(pane)
         with self.bridge.lock:
@@ -76,11 +79,6 @@ class RunService:
                 generation = lease["generation"]
             else:
                 generation = self.bridge.acquire_execution(pane)["generation"]
-            # Host user-turn metadata is approval evidence, not a prerequisite
-            # for routine execution authority. Local receipt order owns that.
-            if authorization:
-                self.bridge.leases[pane]["authorization"] = dict(authorization)
-                self.bridge.persist_state()
         # Deliberately call the strict method, NOT dispatch/auto-renew here.
         # A Human Event between admission and submit must cancel this chain.
         result = self.bridge.terminal_submit(generation=generation, **command)

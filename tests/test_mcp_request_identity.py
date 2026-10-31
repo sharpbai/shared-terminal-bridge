@@ -61,12 +61,13 @@ class RequestIdentityTest(unittest.TestCase):
         server.turn_resolver = self.resolver
         server.call_tool({"name": "terminal_run", "arguments": {
             "pane": "%0", "request_id": "logical", "text": "echo x", "resource_class": "high_io"}, "_meta": self.meta}, False)
-        self.assertEqual(server.bridge.calls[-1][1]["_authorization"],
-                         self.resolver.from_request(self.meta))
+        self.assertNotIn("_authorization", server.bridge.calls[-1][1])
 
     def test_failure_does_not_reach_bridge(self):
         bridge = FakeBridgeV3()
-        server = MinimalMCPServer(bridge, enable_session_management=True, turn_resolver=self.resolver)
-        result = server.acquire_session("local-mac", request_meta={})
-        self.assertEqual(result["error"]["code"], "CODEX_TURN_ID_UNAVAILABLE")
+        server = MinimalMCPServer(bridge, enable_actions=True, enable_session_management=True, turn_resolver=self.resolver)
+        from mcp_server.transport import MCPError
+        with self.assertRaises(MCPError):
+            server.call_tool({"name": "terminal_approve_request",
+                "arguments": {"request_id": "approval"}}, False)
         self.assertEqual(bridge.calls, [])

@@ -28,7 +28,7 @@ class IdentityDiagnosticsTest(unittest.TestCase):
         ), mock.patch("mcp_server.identity_diagnostics.tempfile.mkdtemp", return_value=folder):
             diagnostic = IdentityDiagnostics()
             request = {"method": "tools/call", "params": {
-                "name": "terminal_session_acquire", "arguments": {"secret": "password"},
+                "name": "terminal_run", "arguments": {"secret": "password"},
                 "_meta": {"authorization": "sensitive-token"},
             }}
             for _ in range(40):

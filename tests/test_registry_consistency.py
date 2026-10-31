@@ -83,10 +83,7 @@ class RegistryConsistencyTest(unittest.TestCase):
         names = [tool["name"] for tool in tools]
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(set(names), set(TOOLS_BY_NAME))
-        special_routes = {
-            "terminal_session_acquire": "acquire_execution",
-            "terminal_execution_status": "execution_status",
-        }
+        special_routes = {}
         for name in names:
             with self.subTest(tool=name):
                 bridge_method = special_routes.get(name, name)

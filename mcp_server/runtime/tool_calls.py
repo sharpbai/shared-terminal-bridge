@@ -4,9 +4,9 @@ import json
 import uuid
 
 from mcp_server.config import (
-    REQUIRES_BRIDGE_V2, REQUIRES_BRIDGE_V3, REQUIRES_BRIDGE_V4,
+    REQUIRES_BRIDGE_V2, REQUIRES_BRIDGE_V3,
     REQUIRES_BRIDGE_V5, REQUIRES_BRIDGE_V6, REQUIRES_BRIDGE_V7,
-    REQUIRES_BRIDGE_V8, REQUIRES_BRIDGE_V9,
+    REQUIRES_BRIDGE_V9,
 )
 from mcp_server.transport import MCPError
 from bridge.protocol.model_view import model_view
@@ -55,28 +55,7 @@ class ToolCallService:
         max_lines = arguments.get("max_lines")
         if max_lines is not None and not 1 <= max_lines <= 1000:
             raise MCPError(-32602, "max_lines must be between 1 and 1000")
-        commands = arguments.get("commands")
-        if commands is not None and (
-            not 1 <= len(commands) <= 32
-            or any(not isinstance(command, str) or not command for command in commands)
-        ):
-            raise MCPError(-32602, "commands must contain 1 to 32 non-empty strings")
-        steps = arguments.get("steps")
-        if steps is not None and (
-            not isinstance(steps, list)
-            or not 1 <= len(steps) <= 8
-            or any(
-                not isinstance(step, dict)
-                or not isinstance(step.get("text"), str)
-                or not step.get("text")
-                for step in steps
-            )
-        ):
-            raise MCPError(-32602, "steps must contain 1 to 8 objects with non-empty text")
-        generation = arguments.get("generation")
-        if generation is not None and generation < 1:
-            raise MCPError(-32602, "generation must be positive")
-        for name in ("client", "key", "name", "cwd", "cursor", "block_id"):
+        for name in ("client", "key", "name", "cwd", "cursor"):
             if name in arguments and not arguments[name]:
                 raise MCPError(-32602, f"{name} must not be empty")
 
@@ -86,7 +65,7 @@ class ToolCallService:
         tool = self.server.tool_by_name.get(name)
         if tool is None:
             if (
-                name in (REQUIRES_BRIDGE_V2 | REQUIRES_BRIDGE_V3 | REQUIRES_BRIDGE_V4 | REQUIRES_BRIDGE_V5 | REQUIRES_BRIDGE_V6 | REQUIRES_BRIDGE_V7 | REQUIRES_BRIDGE_V8 | REQUIRES_BRIDGE_V9)
+                name in (REQUIRES_BRIDGE_V2 | REQUIRES_BRIDGE_V3 | REQUIRES_BRIDGE_V5 | REQUIRES_BRIDGE_V6 | REQUIRES_BRIDGE_V7 | REQUIRES_BRIDGE_V9)
                 and compatibility.get("status") in ("legacy", "restart_required")
             ):
                 bridge_response = {
@@ -101,15 +80,7 @@ class ToolCallService:
             raise MCPError(-32602, f"Unknown or disabled tool: {name}")
         arguments = params.get("arguments") or {}
         self.server.validate_arguments(tool, arguments)
-        if name == "terminal_session_acquire":
-            bridge_response = self.server.acquire_session(
-                arguments["name"], request_meta=params.get("_meta") or {}
-            )
-        elif name in {"terminal_wait_job", "terminal_run", "terminal_interrupt_job"}:
-            if name == "terminal_run" and arguments.get("resource_class") in {"high_io", "full_scan"}:
-                turn = self.server.turn_resolver.from_request(params.get("_meta") or {})
-                if turn:
-                    arguments = {**arguments, "_authorization": turn}
+        if name in {"terminal_wait_job", "terminal_run", "terminal_interrupt_job"}:
             wait_id = f"wait_{uuid.uuid4().hex[:12]}"
             with self.server.request_lock:
                 self.server.request_wait_ids[request_id] = wait_id
@@ -129,22 +100,10 @@ class ToolCallService:
             finally:
                 with self.server.request_lock:
                     self.server.request_wait_ids.pop(request_id, None)
-        elif name == "terminal_approve_request":
-            turn = self.server.turn_resolver.from_request(params.get("_meta") or {})
-            if not turn:
-                bridge_response = {"ok": False, "error": {"code": "CODEX_TURN_ID_UNAVAILABLE",
-                    "message": "Approval needs a verified later user turn or an explicit local decision."}}
-            else:
-                bridge_response = self.server.bridge.call(name, {**arguments, "_authorization": turn})
         else:
-            bridge_method = (
-                "execution_status"
-                if name == "terminal_execution_status"
-                else name
-            )
-            bridge_response = self.server.bridge.call(bridge_method, arguments)
+            bridge_response = self.server.bridge.call(name, arguments)
         if (
-            name in (REQUIRES_BRIDGE_V2 | REQUIRES_BRIDGE_V3 | REQUIRES_BRIDGE_V4 | REQUIRES_BRIDGE_V5 | REQUIRES_BRIDGE_V6 | REQUIRES_BRIDGE_V7 | REQUIRES_BRIDGE_V8 | REQUIRES_BRIDGE_V9 | {"terminal_run", "terminal_input_job", "terminal_interrupt_job", "terminal_approve_request"})
+            name in (REQUIRES_BRIDGE_V2 | REQUIRES_BRIDGE_V3 | REQUIRES_BRIDGE_V5 | REQUIRES_BRIDGE_V6 | REQUIRES_BRIDGE_V7 | REQUIRES_BRIDGE_V9 | {"terminal_run", "terminal_interrupt_job"})
             and bridge_response.get("error", {}).get("code") == "METHOD_NOT_FOUND"
         ):
             bridge_response = {
@@ -152,7 +111,7 @@ class ToolCallService:
                 "error": {
                     "code": "BRIDGE_RESTART_REQUIRED",
                     "method": name,
-                    "message": "Restart the local daemon: stb daemon stop && stb daemon start",
+                    "message": "Restart the local daemon: stb-manage daemon stop && stb-manage daemon start",
                 },
             }
         return self.server.tool_result(bridge_response, modern)
@@ -177,69 +136,6 @@ class ToolCallService:
             )
             result["_meta"] = self.server.response_meta()
         return result
-
-    def acquire_session(self, name, request_meta=None):
-        if request_meta is not None:
-            turn = self.server.turn_resolver.from_request(request_meta)
-        else:
-            turn = self.server.turn_resolver.current()
-        if turn is None:
-            return {
-                "ok": False,
-                "error": {
-                    "code": "CODEX_TURN_ID_UNAVAILABLE",
-                    "message": (
-                        "No verified Codex user turn is available; lease was not issued."
-                    ),
-                },
-            }
-        compatibility = self.server.refresh_bridge_compatibility()
-        if compatibility.get("api_version", 3) >= 3:
-            resolved = self.server.bridge.call("terminal_session_resolve", {"name": name})
-            if not resolved.get("ok", False):
-                return resolved
-            session = resolved.get("result", {})
-        else:
-            sessions_response = self.server.bridge.call("terminal_session_list", {})
-            if not sessions_response.get("ok", False):
-                return sessions_response
-            session = next(
-                (
-                    item
-                    for item in sessions_response.get("result", {}).get("sessions", [])
-                    if item.get("name") == name
-                ),
-                None,
-            )
-            if session is None:
-                return {
-                    "ok": False,
-                    "error": {"code": "SESSION_NOT_MANAGED", "session": name},
-                }
-        pane = session.get("pane")
-        if pane in self.server.acquired_panes:
-            status = self.server.bridge.call("execution_status", {"pane": pane})
-            if not status.get("ok", False):
-                return status
-            lease = status.get("result", {}).get("lease")
-            if lease and lease.get("state") == "ACTIVE":
-                authorization = lease.get("authorization") or {}
-                if (authorization.get("turn_id") == turn.get("turn_id")
-                        and authorization.get("thread_id") == turn.get("thread_id")):
-                    return {
-                        "ok": True,
-                        "result": {**lease, "session": name, "idempotent": True},
-                    }
-        response = self.server.bridge.call(
-            "acquire_execution",
-            {"pane": pane, **turn},
-        )
-        if response.get("ok", False):
-            self.server.acquired_panes[pane] = response.get("result", {}).get(
-                "generation"
-            )
-            response.setdefault("result", {})["session"] = name
-        return response
 
     def cancel_request(self, request_id):
         with self.server.request_lock:

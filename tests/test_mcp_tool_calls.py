@@ -32,25 +32,24 @@ class ModelTaskCallsTest(unittest.TestCase):
         self.assertNotIn("lease", data)
         self.assertEqual(data["output"], "literal generation=5")
         self.assertEqual(bridge.calls[-1][0], "terminal_run")
-        self.assertIn("_authorization", bridge.calls[-1][1])
+        self.assertNotIn("_authorization", bridge.calls[-1][1])
         self.assertNotIn("generation", bridge.calls[-1][1])
 
     def test_removed_tools_and_injected_authority_fail_before_bridge(self):
         bridge = FakeBridgeV9()
         server = MinimalMCPServer(bridge, enable_actions=True)
         for name in ["terminal_submit", "terminal_type", "terminal_key", "terminal_interrupt",
-                     "terminal_session_acquire", "terminal_task_block_execute"]:
+                     "terminal_session_acquire", "terminal_task_block_execute", "terminal_input_job"]:
             self.assertIn("error", self.call(server, name, {}))
         for field in ["generation", "_authorization"]:
             self.assertIn("error", self.call(server, "terminal_run", dict(
                 pane="%0", request_id="x", text="echo x", **{field: 1})))
         self.assertEqual(bridge.calls, [])
 
-    def test_job_interrupt_and_input_use_only_handles(self):
+    def test_job_interrupt_uses_only_handle(self):
         bridge = FakeBridgeV9({"ok": True, "result": {"accepted": True}})
         server = MinimalMCPServer(bridge, enable_actions=True)
-        for name, args in [("terminal_interrupt_job", {"job_id": "one"}),
-                           ("terminal_input_job", {"job_id": "one", "request_id": "input-1", "text": "yes"})]:
+        for name, args in [("terminal_interrupt_job", {"job_id": "one"})]:
             result = self.call(server, name, args)
             self.assertFalse(result["result"]["isError"])
             called_name, forwarded = bridge.calls[-1]

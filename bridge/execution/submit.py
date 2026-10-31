@@ -6,12 +6,8 @@ import uuid
 from bridge.common import BridgeError, now, unix_ms
 from bridge.execution.lifecycle import EXECUTING, execution_phase
 from bridge.config import (
-    DEFAULT_IDLE_BUDGET_MS,
     DEFAULT_TOTAL_BUDGET_MS,
-    HIGH_RESOURCE_CLASSES,
     JOB_CAPTURE_LINES,
-    LONG_RUN_APPROVAL_MS,
-    MAX_TOTAL_BUDGET_MS,
 )
 
 
@@ -44,7 +40,6 @@ class SubmitService:
         text: str,
         expected_duration_ms: int = DEFAULT_TOTAL_BUDGET_MS,
         resource_class: str = "normal",
-        long_run_approval_id: str = None,
     ):
         """Type one literal command and press Enter under the same lease check."""
         self.bridge.require_lease(pane, generation)
@@ -59,54 +54,9 @@ class SubmitService:
             raise BridgeError("INVALID_EXPECTED_DURATION") from error
         if resource_class not in {"normal", "high_io", "full_scan"}:
             raise BridgeError("INVALID_RESOURCE_CLASS", resource_class=resource_class)
-        requires_approval = resource_class in HIGH_RESOURCE_CLASSES
-        if requires_approval:
-            with self.bridge.lock:
-                approval = self.bridge.long_run_approvals.get(long_run_approval_id)
-                valid = bool(
-                    approval
-                    and not approval["consumed"]
-                    and approval["pane"] == pane
-                    and approval["generation"] == generation
-                    and approval["command_fingerprint"]
-                    == self.bridge._command_fingerprint(text)
-                    and approval["expected_duration_ms"] == expected_duration_ms
-                    and approval["resource_class"] == resource_class
-                )
-                if valid:
-                    approval["consumed"] = True
-            if not valid:
-                total_budget_ms = min(
-                    MAX_TOTAL_BUDGET_MS,
-                    max(expected_duration_ms, DEFAULT_TOTAL_BUDGET_MS),
-                )
-                request = self.bridge.terminal_long_run_request(
-                    pane,
-                    generation,
-                    text,
-                    expected_duration_ms,
-                    resource_class,
-                    min(DEFAULT_IDLE_BUDGET_MS, total_budget_ms),
-                    total_budget_ms,
-                )
-                raise BridgeError(
-                    "LONG_RUN_APPROVAL_REQUIRED",
-                    pane=pane,
-                    generation=generation,
-                    request_id=request["request_id"],
-                    interaction="input_required",
-                    command=text,
-                    command_fingerprint=request["command_fingerprint"],
-                    expected_duration_ms=expected_duration_ms,
-                    resource_class=resource_class,
-                    idle_budget_ms=request["idle_budget_ms"],
-                    total_budget_ms=request["total_budget_ms"],
-                    prompt=(
-                        "请向用户展示完整命令和资源影响；收到后续明确批准消息前不要执行。"
-                    ),
-                )
         stream = self.bridge.ensure_terminal_stream(pane)
-        baseline = self.bridge.tmux.read(pane, JOB_CAPTURE_LINES)
+        read_baseline = getattr(self.bridge.tmux, 'read_logical_lines', self.bridge.tmux.read)
+        baseline = read_baseline(pane, JOB_CAPTURE_LINES)
         try:
             baseline_pane_command = (
                 self.bridge.tmux.state(pane).get("current_command")
@@ -160,7 +110,6 @@ class SubmitService:
             "expected_duration_ms": expected_duration_ms,
             "resource_class": resource_class,
             "long_running_notice": expected_duration_ms > 30_000,
-            "approval_id": long_run_approval_id if requires_approval else None,
             "job_id": job["job_id"],
             "job_state": job["state"],
         }

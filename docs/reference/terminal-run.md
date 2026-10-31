@@ -1,18 +1,24 @@
 # Terminal Run：一次授权、提交与等待
 
+CLI 默认上下文 40 行，run/wait/interrupt 默认观察 60 秒；这不是命令执行期限，超时后按原 job_id 继续观察，不重提命令。Core 任务预算和人工中断语义不变。
+
+等待模板：`stb wait JOB_ID --seconds 60`；`--seconds` 可设 1–600 秒，表示本次最多观察时长，任务状态变化时可能提前返回。
+
+CLI bootstrap 的首次上下文不输出 execution（旧租约的 human_override、interrupt_source 等历史信息），与 STB-RDC 一致；不清除任务状态，不改变 context 刷新、任务结果或 Core 人工中断判断。
+
 模型默认接口已收敛为 run/job ID，旧模型契约不再兼容，见[当前模型接口](model-tasks.md)。本文涉及的内部授权字段只用于解释 Core 实现，不是模型参数。
 
-`terminal_run` 是 Core 的组合接口，也是 Codex MCP 与 STB-RDC 的默认执行入口。模型不管理内部授权计数；独立低层方法仅供 Core 和人工诊断，不作为模型兼容契约。普通执行以本地 receipt 决定权限，可信宿主回合信息仅用于风险批准证据。
+`terminal_run` 是 Core 的组合接口，也是 Codex MCP 与 STB-RDC 的默认执行入口。模型不管理内部授权计数；独立低层方法仅供 Core 和人工诊断，不作为模型兼容契约。普通执行以本地 receipt 决定权限，高风险确认通过模型与用户对话完成，Core 不维护审批凭证。
 
 ## 接口与能力发现
 
 运行 daemon 的 `bridge_info.terminal_run=receipt-scoped-run-v1` 和 `model_tasks=job-authority-v2` 才表示支持当前契约；仅更新源文件不够，需要重启 Bridge。该接口随 v0.16.0 发布，API 仍为 v9。
 
 ```json
-{"method":"terminal_run","params":{"pane":"%0","request_id":"NEW_UNIQUE_COMMAND_ID","text":"df -h /","expected_duration_ms":1000,"resource_class":"normal","wait_ms":600000}}
+{"method":"terminal_run","params":{"pane":"%0","text":"df -h /","expected_duration_ms":1000,"resource_class":"normal","wait_ms":600000}}
 ```
 
-`pane` 必须有 ACL 权限，`request_id` 必填。单行 `text`、耗时、资源类型与可选 `long_run_approval_id` 沿用 submit。`wait_ms` 为 1–600000 的整数，默认 600000；可选 `wait_id` 继续使用现有取消等待接口。首次接入或人工换机后，仍应先观察环境，run 不推断 SSH 对面的主机身份。
+`pane` 必须有 ACL 权限，`request_id` 可省略，由 Core 自动生成。单行 `text`、耗时、资源类型沿用 submit，不接受批准凭证。`wait_ms` 为 1–600000 的整数，默认 600000；可选 `wait_id` 继续使用现有取消等待接口。首次接入或人工换机后，仍应先观察环境，run 不推断 SSH 对面的主机身份。
 
 ## Core 内部步骤
 
@@ -21,7 +27,7 @@
 3. 使用严格的 `terminal_submit` 直接方法，不经过自动续授权 dispatch。如果授权后、提交前发生有效人工撤权，该调用失败，不重新 acquire。
 4. 将提交结果和 job ID 持久化，然后释放执行阶段，调用原 `terminal_wait_job` 等待。等待不持有 Bridge 全局锁。
 
-没有逐条模型决策，也没有 Adapter 自行串联 API。高风险确认仍由原规则处理，`high_io/full_scan` 仍要求匹配的一次性批准；run 不自动批准。初次因缺少批准而拒绝后，按原审批流程处理，再用新逻辑 ID 携带批准执行。
+Adapter 不自行串联授权步骤。高风险确认由模型在对话中完成；资源类别不触发 Core 审批。
 
 ## 去重与后续观察
 
@@ -42,4 +48,4 @@
 
 `bridge/execution/run.py` 实现组合，`bridge/runtime/command_requests.py` 继续负责持久去重。`tests/test_terminal_run.py` 覆盖授权、旧 receipt、链内中断、批准、去重、取消等待；`tests/host_tmux/test_terminal_run.py` 在隔离 tmux 中验证完成、人工事件唤醒、旧 ID 重试与新调用续权。
 
-该接口不注入脚本、不开放真正多行执行、不自动合并多个需判断的命令。首次 run 无需模型先拿 generation，后续交互/中断使用 job ID，审批使用请求 ID；内部授权计数不进入模型参数。
+该接口不注入脚本、不开放真正多行执行、不自动合并多个需判断的命令。首次 run 无需模型先拿 generation，后续观察/中断使用 job ID；内部授权计数不进入模型参数。

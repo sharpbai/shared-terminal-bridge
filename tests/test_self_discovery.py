@@ -10,12 +10,13 @@ class SelfDiscoveryTest(unittest.TestCase):
         modern = server.discover()["instructions"]
         legacy = server.initialize({"protocolVersion": LEGACY_VERSION})["instructions"]
         self.assertEqual(modern, legacy)
-        for essential in ["no local skill", "terminal_run", "terminal_input_job",
-                          "terminal_interrupt_job", "High-risk", "Human Ctrl+C",
-                          "one-shot bypass", "terminal_program_profile"]:
+        for essential in ["确认目标会话", "通过 run", "job ID", "interrupt",
+                          "高风险", "人工 Ctrl+C", "不重复提交", "CLI", "TUI"]:
             self.assertIn(essential, modern)
         tools = {t["name"]: t for t in server.list_tools(True)["tools"]}
-        self.assertTrue({"terminal_run", "terminal_input_job", "terminal_interrupt_job"} <= set(tools))
+        self.assertTrue({"terminal_run", "terminal_interrupt_job"} <= set(tools))
         self.assertNotIn("terminal_session_acquire", tools)
+        self.assertNotIn("terminal_input_job", tools)
+        self.assertIn("不使用 TUI", modern)
         for tool in tools.values():
             self.assertNotIn("generation", tool["inputSchema"]["properties"])

@@ -18,7 +18,6 @@ try:
         JOB_POLL_INTERVAL_SECONDS,
         JOB_PROMPT_STABLE_MS,
         JOB_TERMINAL_STATES,
-        LONG_RUN_APPROVAL_MS,
         MAX_JOB_WAIT_MS,
         MAX_RETAINED_JOBS,
         MAX_TOTAL_BUDGET_MS,
@@ -35,7 +34,6 @@ except ModuleNotFoundError:
         JOB_POLL_INTERVAL_SECONDS,
         JOB_PROMPT_STABLE_MS,
         JOB_TERMINAL_STATES,
-        LONG_RUN_APPROVAL_MS,
         MAX_JOB_WAIT_MS,
         MAX_RETAINED_JOBS,
         MAX_TOTAL_BUDGET_MS,
@@ -71,6 +69,7 @@ class JobService:
         # prompt when it is still the visible screen suffix, never stale history.
         confirmed = self.bridge.pane_prompts.get(pane)
         if (confirmed and confirmed.get('pane_command') == baseline_pane_command
+                and ('@' not in baseline_prompt or '@' in confirmed['prompt'])
                 and baseline_prompt.endswith(confirmed['prompt'])):
             baseline_prompt = confirmed['prompt']
         job = {

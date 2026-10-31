@@ -5,35 +5,7 @@ from mcp_server.config import (
 )
 from mcp_server.transport import MCPError
 
-INSTRUCTIONS = (
-    "Self-discovery is the entrypoint: these instructions and tools/list schemas "
-    "are sufficient for normal work; no local skill or repository document read is required. "
-    "STB-RDC exclusive-mode contract: RDC is transport/bootstrap only; independent "
-    "target-host capabilities require explicit one-shot bypass and human bypass approval; "
-    "never bypass Human Override, pane ACL or risk approvals. If a needed capability is "
-    "missing, fail closed; broad continue is not bypass permission. "
-    "Observe exact named managed sessions; list only when the name is unknown. "
-    "For execution use terminal_run with pane, unique request_id and command. "
-    "Core handles authority and waits, normally up to 600000 ms. Never manage internal "
-    "authority counters or call removed acquire/submit tools. "
-    "Same ID retries observe the original job, never reexecute. Use terminal_wait_job "
-    "only to continue observing, terminal_input_job to reply to a running program, and "
-    "terminal_interrupt_job for Agent Ctrl+C. Job IDs cannot target newer work. "
-    "Human Ctrl+C stops that chain; a genuinely new run is authorized by local receipt "
-    "order. Do not replay queued steps. Canceling a wait does not stop the job. "
-    "High-risk operations still require human confirmation. high_io/full_scan returns "
-    "an approval request: show exact command and impact, end the turn, then after a "
-    "later explicit approval use terminal_approve_request and a new run ID. "
-    "STRATEGY_REVIEW_REQUIRED means compare alternatives; HUMAN_DECISION_REQUIRED "
-    "does not authorize automatic interruption. Never inject target scripts, markers, "
-    "TTY changes or hidden environment probes. "
-    "Use bounded output/deltas, don't re-read after a complete run result. For known "
-    "TUI programs prefer terminal_program_profile and their CLI; otherwise ask for "
-    "human assistance before costly Agent-driven TUI operation. "
-    "Disable pagers for command output: use git --no-pager ... or GIT_PAGER=cat, "
-    "and systemctl --no-pager ... to avoid getting stuck at (END). "
-    "Bound output where practical; do not change global target configuration."
-)
+from bridge.agent_instructions import INSTRUCTIONS
 
 
 class ProtocolService:

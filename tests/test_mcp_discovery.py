@@ -148,45 +148,18 @@ class MinimalMCPServerTest(unittest.TestCase):
         )
         names = [tool["name"] for tool in server.list_tools(True)["tools"]]
         self.assertIn("terminal_wait_delta", names)
-        self.assertIn("terminal_approve_request", names)
+        self.assertNotIn("terminal_approve_request", names)
         self.assertIn("terminal_session_read_delta", names)
         self.assertIn("terminal_session_wait_delta", names)
         self.assertIn("terminal_session_state", names)
         self.assertNotIn("terminal_long_run_request", names)
 
-    def test_v4_long_run_request_is_structured_input_required(self):
-        bridge = FakeBridgeV4(
-            {
-                "ok": True,
-                "result": {
-                    "interaction": "input_required",
-                    "request_id": "lr_123",
-                    "command": "du -xhd1 /large",
-                },
-            }
-        )
-        server = MinimalMCPServer(bridge, enable_actions=True)
-        names = [tool["name"] for tool in server.list_tools(True)["tools"]]
-        self.assertIn("terminal_run", names)
-        response = server.handle(
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": modern_params(
-                    name="terminal_run",
-                    arguments={
-                        "pane": "%7",
-                        "request_id": "risk-run",
-                        "text": "du -xhd1 /large",
-                        "expected_duration_ms": 180_000,
-                        "resource_class": "full_scan",
-                    },
-                ),
-            }
-        )
-        self.assertFalse(response["result"]["isError"])
-        self.assertEqual(response["result"]["resultType"], "inputRequired")
+    def test_resource_classes_do_not_publish_approval_tools_or_tokens(self):
+        server = MinimalMCPServer(FakeBridgeV4(), enable_actions=True)
+        tools = server.list_tools(True)["tools"]
+        self.assertNotIn("terminal_approve_request", [item["name"] for item in tools])
+        run = next(item for item in tools if item["name"] == "terminal_run")
+        self.assertNotIn("long_run_approval_id", run["inputSchema"]["properties"])
 
     def test_v5_publishes_local_job_wait_tools(self):
         server = MinimalMCPServer(FakeBridgeV6(), enable_actions=True)

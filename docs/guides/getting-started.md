@@ -26,10 +26,10 @@ cd shared-terminal-bridge
 创建托管 session 并立即进入：
 
 ```bash
-./stb create disk-check --cwd /absolute/path --enter
+./stb-manage create disk-check --cwd /absolute/path --enter
 ```
 
-`stb create` 会在默认 Bridge socket 不存在时自动启动后台 daemon。若 tmux server 尚未运行，Bridge 会创建并清理一个短暂的 bootstrap session。
+`stb-manage create` 会在默认 Bridge socket 不存在时自动启动后台 daemon。若 tmux server 尚未运行，Bridge 会创建并清理一个短暂的 bootstrap session。
 
 创建出的 session 带有 managed 标记，首个 pane 会加入动态 ACL，并启用：
 
@@ -41,7 +41,7 @@ mouse on
 退出 tmux 后再次进入：
 
 ```bash
-./stb enter disk-check
+./stb-manage enter disk-check
 ```
 
 - 当前不在 tmux 中时，使用 `attach-session`。
@@ -51,10 +51,10 @@ mouse on
 ## Daemon 管理
 
 ```bash
-./stb daemon start
-./stb daemon status
-./stb daemon logs
-./stb daemon stop
+./stb-manage daemon start
+./stb-manage daemon status
+./stb-manage daemon logs
+./stb-manage daemon stop
 ```
 
 默认运行文件：
@@ -80,18 +80,17 @@ python3 bridge/local_bridge.py serve \
 ```bash
 ./stb list
 ./stb list --json
-./stb create NAME --cwd /absolute/path
-./stb create NAME --cwd /absolute/path --enter
+./stb-manage create NAME --cwd /absolute/path
+./stb-manage create NAME --cwd /absolute/path --enter
 ./stb info NAME
-./stb panes NAME
-./stb enter NAME
-./stb stop NAME
+./stb-manage enter NAME
+./stb-manage stop NAME
 ```
 
-正常情况下使用 `stb stop NAME`，让 Bridge 同时移除 ACL 并撤销 lease。Bridge 不可用且确实需要紧急停止时，可以执行：
+正常情况下使用 `stb-manage stop NAME`，让 Bridge 同时移除 ACL 并撤销 lease。Bridge 不可用且确实需要紧急停止时，可以执行：
 
 ```bash
-./stb stop NAME --direct
+./stb-manage stop NAME --direct
 ```
 
 `--direct` 仍只允许停止带 managed 标记的 session。
@@ -100,45 +99,26 @@ python3 bridge/local_bridge.py serve \
 
 模型默认使用 terminal_run，由 Core 内部处理授权和等待，不需要逐条申请 lease 或传 generation。只有 STB 任务执行期间的人工 Ctrl+C 会取消该旧执行链；空闲操作不撤权。新明确调用按本地接收顺序处理，同一逻辑 ID 重试不重放旧命令。
 
-本地管理员诊断时仍可显式管理内部执行租约（不是模型调用流程）：
+授权由 Core 内部处理；CLI 不提供手工 lease/release 入口。
 
-```bash
-./stb lease NAME
-./stb release NAME GENERATION
-```
-
-创建 session 不等于执行命令。lease/release 属于人工诊断面，不要为了只读观察释放或抢占其他任务权限。
-
-资源风险批准请求（单纯耗时长不自动要求批准）：
-
-```bash
-./stb approvals
-./stb approvals --status PENDING
-./stb approve REQUEST_ID
-./stb reject REQUEST_ID
-```
-
-批准与 pane、generation、完整命令指纹、资源类型和时间预算绑定，不是长期通行证。
+高风险操作由模型先向人展示命令和影响，并通过对话取得同意；Core 不维护审批请求或凭证。资源类别仅用于监控与预算。
 
 ## Job 与等待
 
+通过 `stb info NAME` 找回本会话的当前 job ID（`--json` 同样包含面板和任务）。已结束任务不列为当前任务，Bridge 不可用时不推断为空闲。
+
 ```bash
-./stb jobs
-./stb jobs --state RUNNING
 ./stb job JOB_ID
-./stb watch JOB_ID
 ./stb wait JOB_ID
-./stb waits
-./stb cancel-wait WAIT_ID
 ./stb interrupt JOB_ID
 ```
 
-`cancel-wait` 只取消 Bridge/MCP 的等待，不会停止终端进程。`interrupt` 才会由 Agent 向对应 pane 发送 `Ctrl+C`；真实人工 `Ctrl+C` 还会额外触发 Human Override。
+取消观察由内部等待机制处理，不停止终端进程；CLI 不提供单独诊断入口。`interrupt` 才会由 Agent 向对应 pane 发送 `Ctrl+C`；真实人工 `Ctrl+C` 还会额外触发 Human Override。
 
 ## 查看交互历史
 
 ```bash
-./stb history disk-check --limit 100
+./stb-manage history disk-check --limit 100
 ```
 
 tmux/STB 交互历史默认以 `0600` JSONL 保存到：
@@ -177,20 +157,20 @@ MCP host 可以用以下方式启动 adapter：
 优先执行：
 
 ```bash
-./stb daemon status
-./stb daemon start
-./stb daemon logs
+./stb-manage daemon status
+./stb-manage daemon start
+./stb-manage daemon logs
 ```
 
-`stb create` 通常会自动启动 daemon；若失败，日志会保留启动阶段的错误。
+`stb-manage create` 通常会自动启动 daemon；若失败，日志会保留启动阶段的错误。
 
 ### `no server running on .../tmux-*/default`
 
-当前版本会在创建首个托管 session 时 bootstrap tmux server。若仍出现该错误，确认 tmux 可执行文件可用，并查看 `stb daemon logs`。
+当前版本会在创建首个托管 session 时 bootstrap tmux server。若仍出现该错误，确认 tmux 可执行文件可用，并查看 `stb-manage daemon logs`。
 
 ### `TERMINAL_BUSY` 或内部 `EXECUTION_LEASE_ALREADY_ACTIVE`
 
-观察历史不需要 lease，直接使用只读工具或 `stb history`。写入被当前任务占用时先观察并协调，不释放或抢占另一个有效任务。模型只传 run/job ID，不通过回合身份或授权计数手动恢复。
+观察历史不需要 lease，直接使用只读工具或 `stb-manage history`。写入被当前任务占用时先观察并协调，不释放或抢占另一个有效任务。模型只传 run/job ID，不通过回合身份或授权计数手动恢复。
 
 ### 人工中断后模型还能继续吗
 
@@ -198,6 +178,6 @@ MCP host 可以用以下方式启动 adapter：
 
 ## 清理残留任务占用
 
-本机运行 `stb cleanup-tasks` 预览未结束任务；确认实际终端已可用后，运行 `stb cleanup-tasks --yes` 清理。可用 `--pane '%21'` 限定目标。
+本机运行 `stb-manage cleanup-tasks` 预览未结束任务；确认实际终端已可用后，运行 `stb-manage cleanup-tasks --yes` 清理。可用 `--pane '%21'` 限定目标。
 
-此命令仅支持默认本地实例：先停止 Bridge、创建权限 600 的状态备份，再清理选中的未结束任务并重启。保留已完成任务、提示符缓存、会话、审批及请求防重放记录；撤销当前所有租约。不发送 Ctrl+C，不退出分页器，不停止实际命令。正在执行的命令若被移除跟踪，后续写入可能冲突，因此先人工确认终端空闲。
+此命令仅支持默认本地实例：先停止 Bridge、创建权限 600 的状态备份，再清理选中的未结束任务并重启。保留已完成任务、提示符缓存、会话及请求防重放记录；撤销当前所有租约。不发送 Ctrl+C，不退出分页器，不停止实际命令。正在执行的命令若被移除跟踪，后续写入可能冲突，因此先人工确认终端空闲。

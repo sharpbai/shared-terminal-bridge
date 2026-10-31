@@ -1,9 +1,9 @@
 """Bridge API feature detection and MCP tool visibility."""
 
 from mcp_server.config import (
-    REQUIRES_BRIDGE_V2, REQUIRES_BRIDGE_V3, REQUIRES_BRIDGE_V4,
+    REQUIRES_BRIDGE_V2, REQUIRES_BRIDGE_V3,
     REQUIRES_BRIDGE_V5, REQUIRES_BRIDGE_V6, REQUIRES_BRIDGE_V7,
-    REQUIRES_BRIDGE_V8, REQUIRES_BRIDGE_V9,
+    REQUIRES_BRIDGE_V9,
 )
 
 class CompatibilityService:
@@ -32,7 +32,7 @@ class CompatibilityService:
                 "api_version": 1,
                 "message": (
                     "The running Bridge daemon predates this MCP server. "
-                    "Restart it with: stb daemon stop && stb daemon start"
+                    "Restart it with: stb-manage daemon stop && stb-manage daemon start"
                 ),
             }
         if self.server.bridge_compatibility is None:
@@ -47,11 +47,9 @@ class CompatibilityService:
                 if not (
                     (api_version < 2 and tool["name"] in REQUIRES_BRIDGE_V2)
                     or (api_version < 3 and tool["name"] in REQUIRES_BRIDGE_V3)
-                    or (api_version < 4 and tool["name"] in REQUIRES_BRIDGE_V4)
                     or (api_version < 5 and tool["name"] in REQUIRES_BRIDGE_V5)
                     or (api_version < 6 and tool["name"] in REQUIRES_BRIDGE_V6)
                     or (api_version < 7 and tool["name"] in REQUIRES_BRIDGE_V7)
-                    or (api_version < 8 and tool["name"] in REQUIRES_BRIDGE_V8)
                     or (api_version < 9 and tool["name"] in REQUIRES_BRIDGE_V9)
                 )
             ]

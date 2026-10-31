@@ -3,10 +3,9 @@
 
 SERVICE_DEPENDENCIES = {
     "job_actions": {"lock", "jobs", "authorize", "require_lease", "terminal_type",
-                    "terminal_key", "_submit_once", "_long_run_request", "leases",
-                    "acquire_execution", "terminal_long_run_approve"},
+                    "terminal_key", "_submit_once"},
     "run": {"_submit_once", "terminal_wait_job", "authorize", "lock", "leases",
-            "acquire_execution", "terminal_submit", "jobs", "require_lease", "terminal_interrupt", "persist_state", "cancelled_wait_ids"},
+            "acquire_execution", "terminal_submit", "jobs", "require_lease", "terminal_interrupt", "cancelled_wait_ids"},
     "terminal_events": {
         "tmux", "lock", "jobs", "pane_prompts", "require_lease", "record", "persist_state",
         "handle_human_event", "_signal_job_waits",
@@ -17,7 +16,7 @@ SERVICE_DEPENDENCIES = {
         "_job_hard_deadline_ms", "allow_session_management", "allowed_panes",
         "binding_snapshot_taken", "generations", "human_binding_installed",
         "instance_lock_file", "instance_lock_path", "jobs", "leases",
-        "long_run_requests", "managed_sessions", "original_human_binding",
+        "managed_sessions", "original_human_binding",
         "persist_state", "persistent_state", "state_file", "tmux",
         "tmux_server_id", "command_requests", "pane_prompts",
     },
@@ -49,11 +48,7 @@ SERVICE_DEPENDENCIES = {
         "allowed_panes", "authorize", "generations", "leases", "lock",
         "persist_state", "record", "require_lease", "tmux",
     },
-    "long_run": {
-        "_command_fingerprint", "_long_run_request", "_validate_long_run_budget",
-        "leases", "lock", "long_run_approvals", "long_run_requests",
-        "persist_state", "record", "require_lease",
-    },
+    "command_metadata": set(),
     "jobs": {
         "_command_fingerprint", "_history_command", "_interaction_prompt",
         "_job_hard_deadline_ms", "_last_nonempty_line", "_notify_job",
@@ -65,9 +60,9 @@ SERVICE_DEPENDENCIES = {
         "record", "wait_handles",
     },
     "submit": {
-        "_command_completeness", "_command_fingerprint", "_create_job",
-        "_history_command", "lock", "long_run_approvals", "record", "persist_state", "jobs",
-        "require_lease", "terminal_long_run_request", "tmux", "ensure_terminal_stream",
+        "_command_completeness", "_create_job",
+        "_history_command", "lock", "record", "persist_state", "jobs",
+        "require_lease", "tmux", "ensure_terminal_stream",
     },
     "task_blocks": {
         "_compact_task_excerpt", "_task_assertion", "_validate_read_only_command",

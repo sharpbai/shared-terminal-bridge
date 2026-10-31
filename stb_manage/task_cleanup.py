@@ -6,7 +6,7 @@ import tempfile
 from datetime import datetime
 
 from stb_cli.config import DEFAULT_STATE_FILE, DEFAULT_BRIDGE_SOCKET
-from stb_cli.daemon import stop_bridge_daemon, start_bridge_daemon
+from stb_manage.daemon import stop_bridge_daemon, start_bridge_daemon
 
 
 def clear_unfinished(state, pane=None):

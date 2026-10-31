@@ -4,9 +4,11 @@ import pathlib
 import re
 
 try:
+    from bridge.agent_instructions import INSTRUCTIONS
     from bridge.common import BridgeError, now
     from bridge.config import BRIDGE_API_VERSION, BRIDGE_VERSION, PROGRAM_CAPABILITY_PROFILES
 except ModuleNotFoundError:
+    from agent_instructions import INSTRUCTIONS
     from common import BridgeError, now
     from config import BRIDGE_API_VERSION, BRIDGE_VERSION, PROGRAM_CAPABILITY_PROFILES
 
@@ -35,12 +37,7 @@ class SessionService:
             "terminal_submit",
             "terminal_run",
             "terminal_input_job",
-            "terminal_approve_request",
             "terminal_interrupt_job",
-            "terminal_long_run_request",
-            "terminal_long_run_approve",
-            "terminal_long_run_requests",
-            "terminal_long_run_decide",
             "terminal_job_list",
             "terminal_job_status",
             "terminal_wait_job",
@@ -67,9 +64,12 @@ class SessionService:
             "version": BRIDGE_VERSION,
             "api_version": BRIDGE_API_VERSION,
             "methods": methods,
+            "instructions": INSTRUCTIONS,
             "execution_policy": "local-receipt-auto-renew-v1",
             "command_request_dedup": "durable-submit-v1",
             "terminal_run": "receipt-scoped-run-v1",
+            "run_auto_request_id": True,
+            "input_auto_request_id": True,
             "model_tasks": "job-authority-v2",
             "job_control": "job-bound-interrupt-v1",
         }

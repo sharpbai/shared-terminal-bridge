@@ -1,32 +1,8 @@
 """MCP tool declarations for the sessions domain."""
 
-from mcp_server.tools.common import GENERATION, PANE, object_schema
+from mcp_server.tools.common import PANE, object_schema
 
 TOOLS = [
-    {
-            "name": "terminal_session_acquire",
-            "title": "Acquire this task's execution lease",
-            "description": (
-                "Acquire a fresh execution lease for one managed session only "
-                "when new terminal input is required. Reading history/state never "
-                "requires this tool. A new Codex task must acquire its own "
-                "generation before its first "
-                "write. Acquiring an active same-turn lease is idempotent. "
-                "A new local call after human Ctrl+C may reacquire without asking "
-                "the user again; command calls can also renew automatically. "
-                "Interrupted queued steps are never resumed inside their old call."
-            ),
-            "inputSchema": object_schema(
-                {"name": {"type": "string", "minLength": 1}},
-                ["name"],
-            ),
-            "annotations": {
-                "readOnlyHint": False,
-                "destructiveHint": False,
-                "openWorldHint": False,
-            },
-        }
-,
     {
             "name": "terminal_session_list",
             "title": "List managed tmux sessions",
@@ -89,7 +65,7 @@ TOOLS = [
             "description": (
                 "Create a marked managed tmux session and authorize its initial "
                 "pane in the Bridge ACL. Returns the session name and pane ID for "
-                "the user-facing stb enter command."
+                "the user-facing stb-manage enter command."
             ),
             "inputSchema": object_schema(
                 {

@@ -45,8 +45,6 @@ def bridge_fixture():
     bridge.observation_cursors = {}
     bridge.managed_sessions = {}
     bridge.task_blocks = {}
-    bridge.long_run_requests = {}
-    bridge.long_run_approvals = {}
     bridge.jobs = {}
     bridge.pane_prompts = {}
     bridge.wait_handles = {}

@@ -104,6 +104,10 @@ class TmuxBackend:
             f"-{lines}",
         ).stdout
 
+    def read_logical_lines(self, pane: str, lines: int):
+        """Join only tmux soft wraps; preserve actual application newlines."""
+        return self.run('capture-pane', '-p', '-J', '-t', pane, '-S', f'-{lines}').stdout
+
     def state(self, pane: str):
         result = self.run(
             "display-message",

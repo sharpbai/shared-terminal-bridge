@@ -34,11 +34,10 @@ class LocalReauthorizationTest(unittest.TestCase):
         with request_scope(self.old_receipt), self.assertRaises(BridgeError):
             self.bridge.prepare_command_lease('%0', 1)
 
-    def test_auto_renew_does_not_bypass_resource_approval(self):
-        with self.assertRaises(BridgeError) as raised:
-            self.bridge.dispatch('terminal_submit', dict(self.arguments, resource_class='full_scan'))
-        self.assertEqual(raised.exception.code, 'LONG_RUN_APPROVAL_REQUIRED')
-        self.assertEqual(len(self.bridge.jobs), 1)
+    def test_resource_class_does_not_add_approval_gate(self):
+        result = self.bridge.dispatch('terminal_submit', dict(self.arguments, resource_class='full_scan'))
+        self.assertTrue(result['accepted'])
+        self.assertEqual(len(self.bridge.jobs), 2)
 
     def test_released_and_unknown_generations_are_not_auto_renewed(self):
         self.bridge.leases['%0']['state'] = 'RELEASED'

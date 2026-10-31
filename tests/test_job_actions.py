@@ -18,6 +18,13 @@ class JobActionTest(unittest.TestCase):
         self.core.dispatch("terminal_input_job", args)
         self.assertEqual(self.core.tmux.typed.count(("%0", "yes")), 1)
 
+    def test_input_id_is_internal_and_human_interrupt_still_blocks_it(self):
+        self.core.dispatch("terminal_input_job", dict(job_id=self.job, text="hello"))
+        self.assertIn(("%0", "hello"), self.core.tmux.typed)
+        self.core.handle_human_event(dict(type="human_interrupt", pane="%0", pre_interrupt_content="busy"))
+        with self.assertRaises(BridgeError):
+            self.core.dispatch("terminal_input_job", dict(job_id=self.job, key="Enter"))
+
     def test_old_job_cannot_control_new_authority(self):
         self.core.acquire_execution("%0")
         with self.assertRaises(BridgeError):
@@ -31,14 +38,3 @@ class JobActionTest(unittest.TestCase):
         with self.assertRaises(BridgeError):
             self.core.dispatch("terminal_input_job", dict(job_id=self.job, request_id="old", text="yes"))
         self.assertEqual(self.core.leases["%0"]["state"], "REVOKED")
-
-    def test_approval_without_human_decision_still_fails(self):
-        with self.assertRaises(BridgeError) as error:
-            self.core.dispatch("terminal_run", dict(pane="%0", request_id="risk",
-                text="du /", resource_class="high_io", expected_duration_ms=1000, wait_ms=1))
-        request_id = error.exception.details["request_id"]
-        with self.assertRaises(BridgeError):
-            self.core.dispatch("terminal_approve_request", dict(request_id=request_id))
-        self.core.terminal_long_run_decide(request_id, "approve")
-        approved = self.core.dispatch("terminal_approve_request", dict(request_id=request_id))
-        self.assertIn("approval_id", approved)

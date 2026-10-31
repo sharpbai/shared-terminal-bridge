@@ -1,4 +1,4 @@
-"""Execution leases and explicit long-run approval lifecycle."""
+"""Pane ACL and revocable execution leases."""
 
 import hashlib
 import re
@@ -9,14 +9,12 @@ try:
     from bridge.common import BridgeError, now, unix_ms
     from bridge.config import (
         DEFAULT_IDLE_BUDGET_MS,
-        LONG_RUN_REQUEST_TTL_MS,
         MAX_TOTAL_BUDGET_MS,
     )
 except ModuleNotFoundError:
     from common import BridgeError, now, unix_ms
     from config import (
         DEFAULT_IDLE_BUDGET_MS,
-        LONG_RUN_REQUEST_TTL_MS,
         MAX_TOTAL_BUDGET_MS,
     )
 

@@ -76,7 +76,6 @@ class MinimalMCPServer:
     validate_arguments = ServerMethod("tool_calls")
     call_tool = ServerMethod("tool_calls")
     tool_result = ServerMethod("tool_calls")
-    acquire_session = ServerMethod("tool_calls")
     cancel_request = ServerMethod("tool_calls")
 
     dispatch = ServerMethod("stdio")
@@ -92,7 +91,6 @@ class MinimalMCPServer:
     ):
         self.bridge = bridge
         self.enable_actions = enable_actions
-        self.acquired_panes = {}
         self.turn_resolver = turn_resolver or CodexTurnResolver()
         self.identity_diagnostics = IdentityDiagnostics()
         self.legacy_initialized = False

@@ -2,6 +2,48 @@
 import os
 import subprocess
 import re
+import shlex
+
+SYSTEMCTL_PAGER_COMMANDS = frozenset({
+    'status', 'show', 'cat', 'help', 'list-units', 'list-unit-files',
+    'list-sockets', 'list-timers', 'list-paths', 'list-automounts',
+    'list-dependencies', 'list-jobs', 'list-machines', 'show-environment',
+})
+
+
+def systemctl_pager_command(command):
+    """Recognize introspection verbs, not arbitrary words in quoted output.
+
+    Unknown options before a verb fail closed; no shell evaluation is used.
+    """
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|()')
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    flags = {'--user', '--system', '--all', '-a', '--full', '-l', '--failed',
+             '--reverse', '--plain', '--no-legend', '--no-pager', '--no-ask-password'}
+    values = {'-p', '--property', '-t', '--type', '--state', '-H', '--host',
+              '-M', '--machine', '-n', '--lines', '--root', '--image'}
+    for i, token in enumerate(tokens):
+        if (os.path.basename(token) != 'systemctl'
+                or (i and tokens[i-1] not in {';', '&&', '||', '|', 'sudo', 'command', 'env'})):
+            continue
+        i += 1
+        while i < len(tokens) and tokens[i].startswith('-'):
+            option = tokens[i]
+            if option == '--no-pager':
+                break
+            if option in flags or ('=' in option and option.split('=', 1)[0] in values):
+                i += 1
+            elif option in values and i + 1 < len(tokens):
+                i += 2
+            else:
+                break
+        if i < len(tokens) and tokens[i] in SYSTEMCTL_PAGER_COMMANDS:
+            return True
+    return False
 
 
 END_STATUS = r'(?:lines? \d+(?:-\d+)?/\d+\s+)?\(END\)'
@@ -52,7 +94,7 @@ def at_pager_end(content, tty, raw='', command=''):
     if (not set(foreground) & {'ssh', 'mosh-client'}
             or re.search(r'PAGER\s*=|`|\$\(|\b(?:vim|nvim|vi)\b', command)):
         return False
-    known = re.search(r'\b(?:git\s+(?:diff|log|show)|systemctl\s+(?:status|cat|list-units))\b', command)
+    known = re.search(r'\bgit\s+(?:diff|log|show)\b', command) or systemctl_pager_command(command)
     entered = max(raw.rfind('\x1b[?1049h'), raw.rfind('\x1b[?47h'), raw.rfind('\x1b[?1h'))
     exited = max(raw.rfind('\x1b[?1049l'), raw.rfind('\x1b[?47l'), raw.rfind('\x1b[?1l'))
     return bool(known and entered >= 0 and entered > exited

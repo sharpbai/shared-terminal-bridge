@@ -41,7 +41,7 @@ class PagerExitHostTest(unittest.TestCase):
             self.assertTrue(bridge.jobs[result['job_id']].get('pager_exit_requested'))
             with patch('bridge.tmux.pager.subprocess.run', side_effect=remote_process_evidence):
                 result = bridge.dispatch('terminal_run', dict(pane='%0', request_id='remote-status',
-                    text="systemctl() { printf 'UNIT_DATA\\n' | env LESS= less -+F -X -P 'lines 1-1/1 (END)'; }; systemctl cat test.service", wait_ms=5000))
+                    text="systemctl() { printf 'UNIT_DATA\\n' | env LESS= less -+F -X -P 'lines 1-1/1 (END)'; }; systemctl --user show test.service -p ExecStart", wait_ms=5000))
             self.assertEqual(result['state'], 'COMPLETED', result)
             self.assertTrue(bridge.jobs[result['job_id']].get('pager_exit_requested'))
             job = bridge.jobs[result['job_id']]

@@ -1,6 +1,6 @@
 import unittest
-from stb_cli.task_cleanup import clear_unfinished
-from stb_cli.parser import parser
+from stb_manage.task_cleanup import clear_unfinished
+from stb_manage.parser import parser
 
 
 class TaskCleanupTest(unittest.TestCase):

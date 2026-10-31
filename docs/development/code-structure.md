@@ -18,18 +18,17 @@ STB 按产品功能域组织代码。遇到一个工具或行为时，先在下�
 | --- | --- | --- |
 | `terminal_read`、`terminal_read_delta`、`terminal_wait_delta` | `mcp_server/tools/observation.py` | `bridge/observation/service.py` |
 | `terminal_session_*` | `mcp_server/tools/sessions.py` | `bridge/sessions/service.py` |
-| Execution Lease、generation、`terminal_type` | `mcp_server/tools/execution.py` | `bridge/execution/authority.py` |
-| `terminal_submit` | `mcp_server/tools/execution.py` | `bridge/execution/submit.py` |
-| `terminal_run`、job 输入/中断/审批 | `mcp_server/tools/tasks.py` | `bridge/execution/run.py`、`job_actions.py`；去重见 `bridge/runtime/command_requests.py` |
+| Execution Lease、generation、`terminal_type` | 不对模型发布（内部实现） | `bridge/execution/authority.py` |
+| `terminal_submit` | 不对模型发布（内部实现） | `bridge/execution/submit.py` |
+| `terminal_run`、job 输入/中断 | `mcp_server/tools/tasks.py` | `bridge/execution/run.py`、`job_actions.py`；去重见 `bridge/runtime/command_requests.py` |
 | job 创建与状态更新 | `mcp_server/tools/jobs.py` | `bridge/execution/jobs.py` |
 | `terminal_job_*`、`terminal_wait_job` | `mcp_server/tools/jobs.py` | `bridge/execution/job_wait.py`；状态判定见 `jobs.py` |
-| `terminal_long_run_*` | `mcp_server/tools/long_run.py` | `bridge/execution/long_run.py` |
-| `terminal_task_block*` | `mcp_server/tools/task_blocks.py` | `bridge/execution/task_blocks.py` |
+| 内部 Task Block | 不对模型发布 | `bridge/execution/task_blocks.py` |
 | Task Block 只读命令判断 | 无独立工具 | `bridge/execution/read_only_policy.py` |
-| `terminal_program_profile` | `mcp_server/tools/task_blocks.py` | `bridge/sessions/service.py`；数据在 `bridge/config.py` |
+| `terminal_program_profile` | `mcp_server/tools/programs.py` | `bridge/sessions/service.py`；数据在 `bridge/config.py` |
 | Human `Ctrl+C` / Human Override | 无独立 MCP 写入入口 | `bridge/runtime/human_events.py` |
 | 输出/按键有序事件与执行阶段 | 无独立 MCP 写入入口 | `bridge/tmux/control_stream.py`、`bridge/runtime/terminal_events.py`、`bridge/execution/lifecycle.py` |
-| 本地接收顺序与自动续授权 | 沿用 submit/acquire 工具 | `bridge/runtime/admission.py`、`bridge/execution/authority.py`、`LocalBridge.dispatch` |
+| 本地接收顺序与自动续授权 | Core 内部处理，不发布手工授权工具 | `bridge/runtime/admission.py`、`bridge/execution/authority.py`、`LocalBridge.dispatch` |
 | 审计与持久化历史 | `mcp_server/tools/observation.py` | `bridge/runtime/audit.py` |
 
 Bridge socket 方法的完整注册表位于 `bridge/protocol/registry.py`。MCP 工具的完整注册表位于 `mcp_server/tools/registry.py`。不知道入口时只需先打开这两个小文件之一。
@@ -42,7 +41,6 @@ Bridge socket 方法的完整注册表位于 `bridge/protocol/registry.py`。MCP
 | Lease、generation 与 turn gate | `bridge/execution/authority.py` | `tests/test_turn_gate.py` |
 | 命令提交与 Job 状态 | `bridge/execution/submit.py`、`jobs.py`、`job_wait.py` | `tests/test_bridge_jobs.py` |
 | Run 授权/提交/等待组合 | `bridge/execution/run.py` | `tests/test_terminal_run.py`、`tests/host_tmux/test_terminal_run.py` |
-| 长任务批准 | `bridge/execution/long_run.py` | `tests/test_bridge_long_run.py` |
 | Task Block 与只读 Runner | `bridge/execution/task_blocks.py`、`read_only_policy.py` | `tests/test_bridge_task_blocks.py` |
 | 托管会话与 tmux 操作 | `bridge/sessions/service.py`、`bridge/tmux/backend.py` | `tests/test_bridge_sessions.py`；宿主机基线见 `tests/host_tmux/` |
 | MCP 发布与调用转发 | `mcp_server/tools/`、`mcp_server/runtime/` | `tests/test_mcp_discovery.py`、`test_mcp_tool_calls.py` |
@@ -74,7 +72,7 @@ bridge/
 │   └── service.py              # read、delta cursor 和有界等待
 └── execution/
     ├── authority.py            # pane ACL、lease、generation
-    ├── long_run.py             # 长任务请求与审批
+    ├── command_metadata.py     # 命令指纹与审计脱敏
     ├── submit.py               # 命令完整性检查和提交
     ├── run.py                  # 同 receipt 内授权、单次提交和等待
     ├── jobs.py                 # job 创建、监控与状态更新
@@ -91,40 +89,45 @@ mcp_server/
 ├── runtime/
 │   ├── compatibility.py        # Bridge API 能力检测
 │   ├── protocol.py             # initialize、discover 和工具列表
-│   ├── tool_calls.py           # 参数验证、调用转发和 session acquire
+│   ├── tool_calls.py           # 参数验证、任务调用转发
 │   └── stdio.py                # JSON-RPC stdio 调度
 └── tools/
     ├── registry.py             # 完整工具索引
     ├── observation.py
     ├── sessions.py
-    ├── execution.py
+    ├── tasks.py
     ├── jobs.py
-    ├── long_run.py
-    └── task_blocks.py
+    └── programs.py
 
-stb_cli/
-├── main.py                     # 最小 CLI 调度和统一错误处理
-├── commands_sessions.py        # 会话命令
-├── commands_execution.py       # lease、批准、job、wait 与 interrupt
-├── commands_admin.py           # history 与 daemon
-├── parser.py                   # 根参数和中文帮助入口
-├── parser_sessions.py          # 会话参数
-├── parser_execution.py         # 执行控制参数
-├── parser_admin.py             # 管理参数
-├── client.py                   # tmux discovery 与 Bridge 调用
-├── daemon.py                   # daemon start/status/stop
-├── output.py                   # 人类可读与 JSON 输出
-└── config.py                   # CLI 路径和 tmux 格式
+stb_cli/                       # Agent 执行与共用只读能力
+├── main.py                     # Agent 调度；共用错误处理
+├── parser.py                   # discover/list/info/run/job/wait/interrupt
+├── parser_common.py            # 共用中文帮助与 socket 参数
+├── commands_sessions.py        # 仅 list/info，不改会话
+├── commands_execution.py       # run/job/wait/interrupt
+├── session_info.py             # 面板与当前任务的会话级聚合
+├── command_input.py            # Base64 解码与单行边界
+├── client.py                   # Unix socket 与 tmux 查询
+└── output.py                   # 共用结果显示
+
+stb_manage/                    # 独立人工管理包
+├── main.py                     # stb-manage 调度
+├── parser.py                   # 管理命令帮助
+├── commands_sessions.py        # create/enter/stop
+├── commands_admin.py           # history/daemon/cleanup-tasks
+├── daemon.py                   # daemon 生命周期
+└── task_cleanup.py             # 备份后清理残留任务
+
 ```
 
-`bin/stb` 仅保留可执行入口和历史导入兼容层。默认测试按相同领域拆分为 `test_bridge_*` 与 `test_mcp_*` 文件；共享 fixture 分别位于 `tests/context_support.py` 和 `tests/mcp_support.py`。需要真实 tmux 的集成基线位于 `tests/host_tmux/`，必须在容器外执行。`poc/` 是历史实验和基线实现，不是日常修改入口。
+`bin/stb` 与 `bin/stb-manage` 分别为 Agent 和人工管理入口，不保留旧管理子命令别名。默认测试按相同领域拆分为 `test_bridge_*` 与 `test_mcp_*` 文件；共享 fixture 分别位于 `tests/context_support.py` 和 `tests/mcp_support.py`。需要真实 tmux 的集成基线位于 `tests/host_tmux/`，必须在容器外执行。`poc/` 是历史实验和基线实现，不是日常修改入口。
 
 ## 兼容性约束
 
 - `bridge.local_bridge` 继续导出 `LocalBridge`、`TmuxBackend`、`BridgeError`、`now` 和 `unix_ms`。
 - `mcp_server.server` 继续导出 `MinimalMCPServer`、`BridgeClient`、`MCPError` 和 `CodexTurnResolver`。
 - 公开工具名、Bridge method、socket payload 和错误码不能因目录调整而改变。
-- pane ACL、generation、Human Override、长任务审批必须继续由本地 STB 强制执行。
+- pane ACL、generation、Human Override 必须继续由本地 STB 强制执行。
 - 发布版本以 `bridge/config.py` 的 `BRIDGE_VERSION` 和 `BRIDGE_API_VERSION` 为唯一代码来源；`tests/test_version_consistency.py` 校验 MCP metadata 和当前文档。
 
 ## 验证命令

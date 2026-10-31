@@ -4,7 +4,7 @@ import json
 
 from stb_cli.client import bridge_call
 from stb_cli.config import DEFAULT_LOG_FILE
-from stb_cli.daemon import (
+from stb_manage.daemon import (
     bridge_available,
     bridge_process_running,
     start_bridge_daemon,
@@ -76,7 +76,7 @@ def _daemon(args):
 
 def handle_admin_command(args):
     if args.command == 'cleanup-tasks':
-        from stb_cli.task_cleanup import cleanup
+        from stb_manage.task_cleanup import cleanup
         return cleanup(args)
     if args.command == "history":
         _history(args)

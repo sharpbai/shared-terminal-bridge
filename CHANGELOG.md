@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+暂无。
+
+## v0.18.0 — 2026-10-31
+
+配套 STB-RDC v0.4.0，Bridge API 仍为 v9。本版本包含不兼容的模型/CLI 入口清理：需重启 Bridge 加载新 instructions，并重连 MCP 刷新工具列表；保留 tmux 会话，重启会撤销旧授权。
+
+以下为当前最终实现；中间 stdio/input 方案不作为发布接口。调整过程与加载边界见[2026-10-31 记录](docs/history/changes/2026-10-31-cli-task-simplification.md)。
+
+- Agent CLI 收敛为 list/info/bootstrap/context/discover/run/job/wait/interrupt；管理功能拆到 stb-manage，包含 create/enter/stop、daemon、history、cleanup-tasks 和 MCP 配置。Agent 不暴露 socket 参数；只读 list/info 共享。
+- run 支持 --text 或 --base64 PAYLOAD；删除 --stdio/--stdin 与 input 命令，MCP 取消 terminal_input_job 暴露。复杂单行命令使用工具按 UTF-8 编码并解码回验，严格检查 Base64、UTF-8、控制字符和 65536 字节上限。
+- 通用中文 instructions 由 bridge/agent_instructions.py 维护，MCP 与 CLI 发现共用，不包含 RDC 专属调用规则。Agent 只提交非交互 CLI 任务，交互提示/TUI 请人工操作，不用新 run 伪装回复；保留 Core 内部输入与中断机制。
+- CLI bootstrap/context 默认读取 40 行，run/wait/interrupt 默认观察 60 秒；wait 模板显式展示 --seconds 60（1–600）。bootstrap 不携带 context.execution 的旧中断历史，不清理已有任务。
+- panes/jobs 合并至 info，显示会话所有窗口面板与执行任务 ID；Bridge 不可用时明确任务状态未知。删除 CLI waits/cancel-wait，管理救急入口为 stb-manage cleanup-tasks；Core 取消观察语义不变。
+- 删除强制审批状态机、批准/拒绝命令及审批 API/凭证；资源类别只用于监控与预算。高风险通过对话确认，Core 保留 ACL、内部执行授权、任务互斥、去重与 Human Override。
+- 普通 run 的请求 ID 由 Core 生成，模型无需提供；内部同 ID 去重保留。清理旧 lease/release/watch、旧 MCP schema 和 session-acquire 回退。模型不操作内部授权计数。
+- 已有未发布修复一并保留：Zsh 箭头提示符及分支/dirty 变化、systemctl 只读分页命令集合、窄终端软折行提示符基线；仍要求进程/画面证据，不扩大为任意提示符或 END 匹配。
+- 当前指南、代码地图、验证索引与路线图按最终 CLI-only 方向更新；历史实测不改写为当前接口。Bridge 源码更新需重启加载，MCP 工具与 instructions 需重连刷新。
+
 ## v0.17.0 — 2026-10-21
 
 配套 STB-RDC v0.3.1，Bridge API 保持 v9，run/job 模型入口不变。升级重启 Bridge（撤销租约、保留终端进程），重连 MCP 刷新 schema/instructions。分页判断仍是有界启发式，远端分支测试采用 SSH 进程证据回放，不宣称已覆盖所有远端 Shell。

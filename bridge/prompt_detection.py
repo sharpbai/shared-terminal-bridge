@@ -2,6 +2,18 @@
 
 import re
 
+
+def same_zsh_arrow_prompt(baseline, candidate):
+    """Known compact Zsh theme only; do not accept arbitrary arrow text.
+
+    Environment prefixes must be unchanged. Allow a single cwd token and the
+    theme's optional git:(branch) plus dirty marker, not commands after it.
+    """
+    pattern = r'(?P<env>(?:\([^()\r\n]+\)\s+)*)➜\s+[^\s;|&<>]+(?:\s+git:\([^()\r\n]+\)(?:\s+[✗✘✓✔*]+)?)?'
+    before = re.fullmatch(pattern, baseline.strip())
+    after = re.fullmatch(pattern, candidate.strip())
+    return bool(before and after and before['env'].strip() == after['env'].strip())
+
 def returned_prompt(baseline, content):
     """Recognize a prompt after output without a newline, only at a shell
     readline-enable boundary. A textual suffix alone is not completion proof.
@@ -11,6 +23,13 @@ def returned_prompt(baseline, content):
     lines = AIContextPolicy.normalize(content)
     tail = next((line.strip() for line in reversed(lines) if line.strip()), '')
     if same_prompt_family(baseline, tail):
+        return tail
+    # This theme has no trailing $/#. Require current readline input mode in
+    # addition to its shape; plain log output with an arrow is not sufficient.
+    enabled = content.rfind('\x1b[?2004h')
+    disabled = content.rfind('\x1b[?2004l')
+    if (enabled > disabled and enabled >= max(0, len(content) - 1024)
+            and same_zsh_arrow_prompt(baseline, tail)):
         return tail
     boundary = '\x1b[?2004h'
     if boundary in content:

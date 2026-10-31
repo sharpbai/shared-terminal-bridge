@@ -4,6 +4,10 @@
 
 ## 自动化回归
 
+v0.18.0 / Adapter v0.4.0 发版回归（2026-10-31）：最终源码重跑 Core 196 项默认测试（13 项跳过）、Adapter 40 项、跨仓库 socket 2 项、宿主机隔离 tmux 16 项，均通过。以下同日阶段与旧版本计数仅作历史对照；真实 ChatGPT/RDC 业务全链路及生产加载仍需独立确认。
+
+2026-10-31 未发布入口调整：Core 196 项默认测试（13 项跳过）、Adapter 40 项通过；文本/Base64 的 2 项跨仓库 socket 回归及 16 项隔离 tmux 回归在此前同日阶段通过。最终移除 input 后已重跑默认测试；没有把它表述为重新完成全部真实链路。完整范围与加载状态见[当日记录](../history/changes/2026-10-31-cli-task-simplification.md)。
+
 2026-10-21 v0.17.0 发布回归：默认测试 170 项（9 项跳过，其余通过），宿主机隔离 tmux 14 项通过；compileall、git diff --check 通过。覆盖 Agent 中断确认/取消、滚屏输入、无换行及基线缓存、开始确认、单任务多分页周期、less -X 带行数 END、本地任务清理。远端分页使用真实 tmux/less 画面与 SSH 进程证据回放，不等于真实远端全环境认证；Terminal 保活和 Jev 不纳入测试范围。
 
 最近记录：[2026-10-19 任务接口、自发现与 v0.16.0 发布](../history/changes/2026-10-19-model-api-release.md)，含最终测试与发布证据；前序 [2026-10-18 调整过程](../history/changes/2026-10-18-state-and-transport.md)保留阶段快照，不作为当前接口。
@@ -37,7 +41,7 @@ python3 -m unittest discover -s tests -p 'test_*_baseline.py'
 | daemon/server identity | 单实例锁、tmux UUID 和 pane ID 复用隔离通过 | [Instance Identity](instance-identity.md) |
 | 真实 tmux 日常验收 | 观察、隔离、Agent/Human 中断和 stale action 检查通过 | [Live Acceptance](live-tmux-acceptance.md) |
 | Task Block Runner | 白名单只读多步骤、逐步 lease 校验和停止条件通过 | [Task Block Runner](task-block-runner.md) |
-| 程序能力选择 | CLI/CMD/batch 优先与轻量 TUI fallback 策略通过 | [Program Capability](program-capability-v9.md) |
+| 程序能力选择（历史） | v0.14.0 阶段曾验证轻量 TUI fallback；现行 Agent 仅提交 CLI 任务，TUI 交人工处理 | [Program Capability](program-capability-v9.md) |
 | STB-RDC Exclusive Mode contract | modern/legacy MCP 均发布 fail-closed 与 one-shot bypass 说明 | [Exclusive Mode](../reference/stb-rdc-exclusive-mode.md) |
 
 操作实测基线另见：

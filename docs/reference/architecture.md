@@ -16,10 +16,12 @@ ChatGPT → RDC Adapter ┘                 ↑
 | tmux | session/pane、真实输入输出、scrollback、client 按键 | 模型推理和业务批准 |
 | Bridge Core | Pane ACL、任务状态、内部授权计数、事件顺序、去重、等待、审计 | 远程可达性或目标环境安装 |
 | MCP | 工具发现、结构化参数、取消观察、响应整形 | 第二套执行状态机 |
-| RDC Adapter | 设备通道上的发现、stdin JSONL 映射 | 直接操作 tmux 或复制权限逻辑 |
+| RDC Adapter | 设备通道上的发现、CLI 文本/Base64 解码与结果整形 | 直接操作 tmux 或复制权限逻辑 |
 | 模型 | 理解任务、制定命令、判断证据和风险 | 指定内部授权计数或绕过人工中断 |
 
 ## 三类操作
+
+远端 systemctl 分页子命令集中维护于 `bridge/tmux/pager.py` 的 `SYSTEMCTL_PAGER_COMMANDS`，包括 show、status、cat、help、各类只读列表、依赖关系及环境查看。使用词法拆分定位命令，支持绝对路径、sudo 和常见前置选项；未知选项与显式 --no-pager 保守拒绝，不执行 Shell 解析。此分类仍须结合前台进程和实际分页画面，不能单独授权发键。
 
 支持纯 `(END)` 及 `lines 1-N/N (END)` 状态栏。远端 less -X 可用仍开启的应用键盘模式替代 alternate-screen 证据，仍须同时满足已知分页命令、SSH 前台进程和反色视频状态栏；不放宽为任意 END 文本匹配。分页周期也追踪应用键盘模式的退出/重新进入。
 
@@ -29,11 +31,15 @@ Core 对当前任务输出中的 `(END)` 做保守分页识别：本机前台进
 
 开始与 Agent 中断标记通过同一 tmux control 连接的字面命令响应交付，不依赖瞬时客户端消息。开始确认后清除 pending；5 秒仍未确认时返回 command_start_unconfirmed，保留执行占用并禁止自动重发，不从后来的屏幕快照臆测完成。
 
-观察读取有界历史/增量，不申请写权，也不抢占其他执行任务。run 输入单行可见命令并返回 job；交互和中断只使用 job ID。session 管理属于独立、显式启用的能力。
+观察读取有界历史/增量，不申请写权，也不抢占其他执行任务。run 输入单行可见命令并返回 job；查询和中断只使用 job ID。session 管理属于独立、显式启用的能力。
 
 模型只见任务契约，内部 lease/generation 仍严格存在，不能因隐藏字段而放宽。当前工具映射见 [模型接口](model-tasks.md)，不从历史 API 复制调用。
 
 ## 任务状态与人工事件
+
+紧凑 Zsh 箭头提示符允许 cwd 与 `git:(branch)` / dirty 装饰变化，但环境前缀必须一致，且有序输出末尾附近须存在仍开启的 readline 输入模式证据；不接受任意箭头日志或提示符后的未提交命令。该规则不是任意自定义主题的通用解析器。
+
+提交前的提示符基线通过 tmux `capture-pane -J` 读取逻辑行，只拼接终端自动折行，不合并程序真正的换行。普通观察仍保留原有画面行格式。完整 user@host 基线不使用缺失该身份的旧截断缓存，避免窄终端只保存主机名末段。
 
 命令开始、终端输出、人工 Ctrl+C 进入同 pane 的有序事件流，以 epoch/sequence/job/内部授权关联。
 

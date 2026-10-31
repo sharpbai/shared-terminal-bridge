@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Command-level tests for stb enter behavior."""
+"""Command-level tests for stb-manage enter behavior."""
 
 import importlib.machinery
 import importlib.util
@@ -11,11 +11,7 @@ from unittest import mock
 
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
-STB_PATH = PROJECT_ROOT / "bin" / "stb"
-loader = importlib.machinery.SourceFileLoader("stb_cli", str(STB_PATH))
-spec = importlib.util.spec_from_loader(loader.name, loader)
-stb_cli = importlib.util.module_from_spec(spec)
-loader.exec_module(stb_cli)
+from stb_manage import commands_sessions as stb_cli
 
 
 class STBEnterTest(unittest.TestCase):

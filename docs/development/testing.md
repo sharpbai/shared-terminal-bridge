@@ -31,7 +31,7 @@ python3 -m unittest discover -s tests/host_tmux -p 'test_*.py' -v
 ## 完成前检查
 
 ```bash
-python3 -m compileall -q bridge mcp_server stb_cli
+python3 -m compileall -q bridge mcp_server stb_cli stb_manage
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 python3 bridge/local_bridge.py --help
 python3 mcp_server/server.py --help

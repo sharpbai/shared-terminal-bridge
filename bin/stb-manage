@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Human management entrypoint; resolves symlinks to the repository."""
+import pathlib
+import sys
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from stb_manage.main import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())

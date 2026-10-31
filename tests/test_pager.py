@@ -1,10 +1,18 @@
 import subprocess
 import unittest
 from unittest.mock import patch
-from bridge.tmux.pager import at_pager_end, update_cycle
+from bridge.tmux.pager import at_pager_end, update_cycle, systemctl_pager_command, SYSTEMCTL_PAGER_COMMANDS
 
 
 class PagerTest(unittest.TestCase):
+    def test_systemctl_introspection_verbs_and_options(self):
+        for verb in SYSTEMCTL_PAGER_COMMANDS:
+            for prefix in ('systemctl ', 'sudo /usr/bin/systemctl --user ',
+                           'true; systemctl -p ExecStart --type=service '):
+                self.assertTrue(systemctl_pager_command(prefix + verb + ' unit'), prefix + verb)
+        for command in ('echo "systemctl show"', 'systemctl restart x',
+                        'systemctl --unknown show', 'systemctl --no-pager show'):
+            self.assertFalse(systemctl_pager_command(command), command)
     def test_cycle_requires_exit_before_reentry_and_handles_split_bytes(self):
         job = {}
         self.assertEqual(update_cycle(job, '\x1b[?104'), 0)
@@ -33,6 +41,8 @@ class PagerTest(unittest.TestCase):
         raw_status = '\x1b[?1h\x1b=\rdata\r\n\x1b[7mlines 1-13/13 (END)\x1b[27m\x1b[K'
         self.assertTrue(at_pager_end(['lines 1-13/13 (END)'], 'tty', raw_status,
                                     'systemctl cat gw-stat-collect.service'))
+        self.assertTrue(at_pager_end(['lines 1-13/13 (END)'], 'tty', raw_status,
+                                    'systemctl show x.service -p ExecStart -p ActiveState'))
         self.assertFalse(at_pager_end(['log says (END)'], 'tty', raw_status,
                                      'systemctl cat gw-stat-collect.service'))
         for command, screen in [('echo hello', raw), ('git diff', '(END)'),

@@ -17,10 +17,10 @@ python3 mcp_server/server.py --enable-actions --enable-session-management
 1. 已知会话名时直接使用 name-based 观察，得到实际 pane 并核对目标，不先枚举全部会话。
 2. 调用 terminal_run：pane、唯一 request_id、单行命令，以及可选耗时、资源类别和等待窗口。Core 内部授权、提交和等待。
 3. 完成结果已含有界输出，不再补读。尚在运行则按 job ID 继续观察。
-4. terminal_input_job 用 job ID 和唯一输入请求 ID 回复执行中的程序；terminal_interrupt_job 只中断该 job，不可作用于较新任务。
-5. 高资源请求返回审批信息；展示完整命令与影响，取得有效后续人工批准后 terminal_approve_request，再用新 run ID 携带批准执行。
+4. terminal_interrupt_job 只中断指定 job，不能控制较新任务；不再暴露 terminal_input_job，CLI 任务遇到交互由人工处理。
+5. 高风险操作由模型展示命令与影响并在对话中取得同意；Core 不提供审批工具，资源类别仅用于监控。
 
-普通 run 不要求模型提供或取得宿主回合身份；风险审批所需的可信回合证据由 MCP 内部读取，模型不能通过参数伪造。无法验证审批时继续 fail closed，保留人工本地批准入口。
+普通 run 不要求模型提供宿主回合身份或生成请求 ID。Core 执行 ACL、任务互斥、人工中断及去重；风险确认不由状态机强制。
 
 ## 等待和取消
 

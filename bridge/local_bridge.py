@@ -31,7 +31,7 @@ try:
     from bridge.execution.authority import AuthorityService
     from bridge.execution.jobs import JobService
     from bridge.execution.job_wait import JobWaitService
-    from bridge.execution.long_run import LongRunService
+    from bridge.execution.command_metadata import CommandMetadataService
     from bridge.execution.read_only_policy import ReadOnlyPolicy
     from bridge.execution.submit import SubmitService
     from bridge.execution.run import RunService
@@ -51,7 +51,7 @@ except ModuleNotFoundError:  # Direct execution: ./bridge/local_bridge.py
     from execution.authority import AuthorityService
     from execution.jobs import JobService
     from execution.job_wait import JobWaitService
-    from execution.long_run import LongRunService
+    from execution.command_metadata import CommandMetadataService
     from execution.read_only_policy import ReadOnlyPolicy
     from execution.submit import SubmitService
     from execution.run import RunService
@@ -78,7 +78,7 @@ class LocalBridge:
         "sessions": SessionService,
         "observation": ObservationService,
         "authority": AuthorityService,
-        "long_run": LongRunService,
+        "command_metadata": CommandMetadataService,
         "jobs": JobService,
         "job_wait": JobWaitService,
         "submit": SubmitService,
@@ -157,15 +157,9 @@ class LocalBridge:
     execution_status = ServiceMethod("authority")
     terminal_type = ServiceMethod("authority")
 
-    # bridge/execution/long_run.py
-    _command_fingerprint = ServiceMethod("long_run")
-    _history_command = ServiceMethod("long_run")
-    _validate_long_run_budget = ServiceMethod("long_run")
-    _long_run_request = ServiceMethod("long_run")
-    terminal_long_run_request = ServiceMethod("long_run")
-    terminal_long_run_requests = ServiceMethod("long_run")
-    terminal_long_run_decide = ServiceMethod("long_run")
-    terminal_long_run_approve = ServiceMethod("long_run")
+    # bridge/execution/command_metadata.py
+    _command_fingerprint = ServiceMethod("command_metadata")
+    _history_command = ServiceMethod("command_metadata")
 
     # bridge/execution/jobs.py
     _last_nonempty_line = ServiceMethod("jobs")
@@ -190,7 +184,6 @@ class LocalBridge:
     terminal_submit = ServiceMethod("submit")
     terminal_run = ServiceMethod("run")
     terminal_input_job = ServiceMethod("job_actions")
-    terminal_approve_request = ServiceMethod("job_actions")
     terminal_interrupt_job = ServiceMethod("run")
 
     def _submit_once(self, params, execute):
@@ -237,8 +230,6 @@ class LocalBridge:
         self.audit = []
         self.observation_cursors = {}
         self.task_blocks = {}
-        self.long_run_requests = {}
-        self.long_run_approvals = {}
         self.jobs = {}
         self.pane_prompts = {}
         self.command_requests = {}

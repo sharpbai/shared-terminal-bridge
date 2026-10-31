@@ -6,7 +6,7 @@ import shlex
 
 from bridge.common import BridgeError
 from bridge.config import READ_ONLY_COMMANDS, READ_ONLY_SUBCOMMANDS
-from bridge.execution.long_run import LongRunService
+from bridge.execution.command_metadata import CommandMetadataService
 from bridge.execution.submit import SubmitService
 
 
@@ -21,7 +21,7 @@ class ReadOnlyPolicy:
             raise BridgeError(
                 "TASK_BLOCK_COMMAND_NOT_READ_ONLY",
                 reason="shell control operators, redirection, and expansion are not supported",
-                command=LongRunService._history_command(text),
+                command=CommandMetadataService._history_command(text),
             )
         try:
             tokens = shlex.split(text, posix=True)

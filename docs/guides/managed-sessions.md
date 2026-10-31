@@ -1,5 +1,11 @@
 # 托管 tmux Session 与 stb 快捷命令
 
+人工管理统一使用 `stb-manage`：create/enter/stop、daemon、history、cleanup-tasks、mcp。`stb` 只提供 Agent 发现、观察和任务执行；只读 list/info 两边共享。两个入口使用同一 Core，不构成不同宿主权限边界。将仓库 bin 加入 PATH 后两条命令均可使用；旧管理子命令不保留别名。
+
+`stb` 默认连接本机实例，不暴露 socket 参数。确需操作隔离实例时，人工使用 `stb-manage --tmux-socket NAME --bridge-socket PATH ...`；MCP 自定义连接配置也由 `stb-manage mcp` 引导，不让 Agent 在普通执行中选择连接端点。
+
+使用 `stb info NAME` 或 `stb info NAME --json` 统一查看所有窗口的面板和当前任务 ID；独立 panes/jobs 命令已移除。任务详情用 `stb job JOB_ID`，继续等待用 `stb wait JOB_ID`。Bridge 不可用会标记任务状态未知；没有跟踪任务不代表没有人工命令。
+
 ## 启用 Bridge 和 MCP
 
 Bridge 必须显式允许托管 session：
@@ -57,7 +63,7 @@ mouse on
 MCP 创建 session 并返回 `name` 后，在项目目录执行：
 
 ```bash
-./stb enter SESSION_NAME
+./stb-manage enter SESSION_NAME
 ```
 
 - 当前不在 tmux 中：执行 `tmux attach-session`。
@@ -74,39 +80,27 @@ MCP 创建 session 并返回 `name` 后，在项目目录执行：
 ```bash
 ./stb list
 ./stb list --json
-./stb create NAME --cwd /absolute/path
-./stb create NAME --cwd /absolute/path --enter
+./stb-manage create NAME --cwd /absolute/path
+./stb-manage create NAME --cwd /absolute/path --enter
 ./stb info NAME
-./stb panes NAME
-./stb enter NAME
-./stb lease NAME
-./stb release NAME GENERATION
-./stb approvals
-./stb approvals --status PENDING
-./stb approve REQUEST_ID
-./stb reject REQUEST_ID
-./stb jobs
-./stb jobs --state RUNNING
+./stb-manage enter NAME
 ./stb job JOB_ID
-./stb waits
-./stb cancel-wait WAIT_ID
 ./stb wait JOB_ID
-./stb watch JOB_ID
 ./stb interrupt JOB_ID
-./stb stop NAME
+./stb-manage stop NAME
 ```
 
-`stb create` 发现默认 Bridge socket 不存在时会自动在后台启动 daemon，因此无需先手工
+`stb-manage create` 发现默认 Bridge socket 不存在时会自动在后台启动 daemon，因此无需先手工
 执行 `bridge/local_bridge.py serve`。后台进程可通过以下命令管理：
 
 ```bash
-stb daemon start
-stb daemon status
-stb daemon logs
-stb daemon stop
+stb-manage daemon start
+stb-manage daemon status
+stb-manage daemon logs
+stb-manage daemon stop
 
 # 查询持久化的 tmux/STB 操作历史
-stb history <会话名称> --limit 100
+stb-manage history <会话名称> --limit 100
 ```
 
 默认运行文件：
@@ -128,7 +122,7 @@ Bridge，以便移除 ACL 并撤销 lease。
 Bridge 不可用且确实需要紧急停止时：
 
 ```bash
-./stb stop NAME --direct
+./stb-manage stop NAME --direct
 ```
 
 `--direct` 仍只能停止带 managed 标记的 session。Bridge 下次启动时会清理
@@ -137,7 +131,7 @@ Bridge 不可用且确实需要紧急停止时：
 ## 安全边界
 
 - 普通 tmux session 不会出现在 `stb list`。
-- `stb enter/stop/info/panes/lease/release` 均拒绝未标记 session。
+- `stb-manage enter/stop/info` 均拒绝未标记 session。
 - MCP session management 默认不注册，必须显式启用。
 - 创建 session 不等于取得 execution lease；MCP 仍不暴露 lease acquisition。
 - session 名限制为 1–64 位字母、数字、`.`、`_`、`-`。
@@ -154,6 +148,6 @@ python3 -m unittest tests/test_stb_cli.py
 
 ## CLI 自发现与 MCP 接入
 
-`stb discover --json` 返回离线能力导航、MCP stdio 启动参数、全局注册命令与安全规则。`stb mcp` 显示中文接入说明，亦支持 `--json`。它们不连接 daemon、不修改客户端配置、不申请授权或执行终端任务。
+`stb discover --json` 仅返回 Agent 离线能力导航、执行与安全规则，不输出 socket 配置。`stb-manage mcp` 返回 MCP stdio 启动参数、全局注册命令与中文接入说明，亦支持 `--json`。两者均不连接 daemon、不修改客户端配置、不申请授权或执行终端任务。
 
 注册命令使用当前 Python 和仓库的绝对路径，保留 `--bridge-socket` 全局参数。已有同名 MCP 时先核对配置，不覆盖定制参数。长等待需在全局配置对应 server 段设置 `tool_timeout_sec = 660`；注册后重连 MCP 或新建任务。日常操作按运行中的 MCP instructions 与 schema，无需读取 skill。

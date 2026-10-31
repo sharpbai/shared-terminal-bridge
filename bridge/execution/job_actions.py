@@ -1,5 +1,6 @@
-"""Resolve interactive input/approval authority inside Core, never in models."""
+"""Resolve interactive input authority inside Core, never in models."""
 from bridge.common import BridgeError
+from uuid import uuid4
 from bridge.execution.lifecycle import EXECUTING, execution_phase
 
 
@@ -7,7 +8,7 @@ class JobActionService:
     def __init__(self, bridge):
         self.bridge = bridge
 
-    def terminal_input_job(self, job_id, request_id, text=None, key=None):
+    def terminal_input_job(self, job_id, request_id=None, text=None, key=None):
         if (text is None) == (key is None):
             raise BridgeError("INVALID_JOB_INPUT", reason="provide text OR key")
         if text is not None and (not isinstance(text, str) or any(
@@ -32,21 +33,7 @@ class JobActionService:
                 else:
                     result = self.bridge.terminal_key(pane, job["generation"], key)
                 return dict(result, job_id=job_id)
+        if request_id is None:
+            request_id = "input_" + uuid4().hex
         return self.bridge._submit_once(dict(operation="terminal_input_job", pane=pane,
             request_id=request_id, job_id=job_id, text=text, key=key), execute)
-
-    def terminal_approve_request(self, request_id, _authorization=None):
-        # The original approval implementation still checks later trusted user
-        # intent or an explicit local CLI decision. No new approval shortcut.
-        request = self.bridge._long_run_request(request_id)
-        pane = request["pane"]
-        self.bridge.authorize(pane)
-        with self.bridge.lock:
-            lease = self.bridge.leases.get(pane)
-            if _authorization:
-                lease = self.bridge.acquire_execution(pane, **_authorization)
-            elif not lease or lease["state"] != "ACTIVE":
-                authorization = dict((lease or {}).get("authorization") or {})
-                lease = self.bridge.acquire_execution(pane, **authorization)
-            return self.bridge.terminal_long_run_approve(
-                pane, lease["generation"], request_id=request_id)

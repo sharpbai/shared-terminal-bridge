@@ -12,7 +12,7 @@ import time
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BRIDGE = PROJECT_ROOT / "bridge" / "local_bridge.py"
 MCP = PROJECT_ROOT / "mcp_server" / "server.py"
-STB = PROJECT_ROOT / "bin" / "stb"
+STB = PROJECT_ROOT / "bin" / "stb-manage"
 TMUX_SOCKET = "managed-session-poc"
 CONTROL_SOCKET = pathlib.Path("/tmp/managed-session-control.sock")
 EVENT_SOCKET = pathlib.Path("/tmp/managed-session-events.sock")
@@ -160,7 +160,6 @@ def main():
         )
         listed = json.loads(stb("list", "--json").stdout)
         info = json.loads(stb("info", MANAGED_NAME, "--json").stdout)
-        panes = stb("panes", MANAGED_NAME).stdout
         new_window = tmux(
             "new-window",
             "-d",
@@ -181,11 +180,12 @@ def main():
                 capture=True,
             ).stdout.strip()
         )
-        lease = json.loads(stb("lease", MANAGED_NAME).stdout)
+        # Internal authority lifecycle remains covered, but no public CLI lease
+        # choreography: ordinary callers use run/job handles.
+        info = json.loads(stb("info", MANAGED_NAME, "--json").stdout)
+        lease = bridge_call("acquire_execution", {"pane": pane})["result"]
         generation = lease["generation"]
-        released = json.loads(
-            stb("release", MANAGED_NAME, str(generation)).stdout
-        )
+        released = bridge_call("release_execution", {"pane": pane, "generation": generation})["result"]
         ordinary_stop = stb("stop", ORDINARY_NAME, check=False)
         stopped = json.loads(stb("stop", MANAGED_NAME).stdout)
         remaining = tmux(
@@ -220,8 +220,9 @@ def main():
                 session["name"] == MANAGED_NAME for session in listed
             ),
             "stb_info_matches": info["pane"] == pane,
-            "stb_panes_matches": pane in panes,
-            "stb_lease_and_release": (
+            "stb_info_contains_panes": pane in {item["pane"] for item in info["panes"]},
+            "stb_info_includes_all_windows": len(info["panes"]) == 2,
+            "internal_authority_lifecycle": (
                 lease["state"] == "ACTIVE"
                 and released["state"] == "RELEASED"
             ),

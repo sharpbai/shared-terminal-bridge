@@ -1,5 +1,7 @@
 # STB 文档入口
 
+2026-10-31 发版整理：[2026-10-31 CLI 任务入口与发现整理](history/changes/2026-10-31-cli-task-simplification.md)；日常参数仍以本页各当前指南为准。
+
 按当前目的进入；日常使用不需要先读开发说明或演进记录。模型直接使用 MCP 自发现 instructions/schema。
 
 | 目的 | 首选页面 | 接着看什么 |

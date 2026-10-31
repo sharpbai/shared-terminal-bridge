@@ -10,6 +10,16 @@ from tests.context_support import bridge_fixture
 
 
 class TerminalRunTest(unittest.TestCase):
+    def test_core_generates_id_and_returned_id_can_observe_without_replay(self):
+        params = dict(self.args)
+        del params['request_id']
+        result = self.bridge.dispatch('terminal_run', params)
+        self.assertTrue(result['request_id'].startswith('run_'))
+        self.assertTrue(result['job_id'])
+        replay = self.bridge.dispatch('terminal_run', dict(params, request_id=result['request_id']))
+        self.assertEqual(replay['job_id'], result['job_id'])
+        self.assertEqual(len(self.bridge.tmux.typed), 1)
+
     def test_routine_run_does_not_depend_on_previous_thread_identity(self):
         self.bridge.leases["%0"].update(state="REVOKED", revoke_reason="daemon_restart",
             authorization={"thread_id": "older-thread"})
@@ -82,25 +92,14 @@ class TerminalRunTest(unittest.TestCase):
         self.assertEqual(self.bridge.generations["%0"], 1)
         self.assertEqual(len(self.bridge.tmux.typed), 1)
 
-    def test_approval_is_still_required_and_can_be_consumed_once(self):
-        with self.assertRaises(BridgeError) as raised:
-            self.run_command(resource_class="high_io", expected_duration_ms=1000)
-        self.assertEqual(raised.exception.code, "LONG_RUN_APPROVAL_REQUIRED")
-        self.assertEqual(self.bridge.tmux.typed, [])
-        with self.assertRaises(BridgeError):
-            self.bridge.terminal_long_run_approve("%0", 1,
-                request_id=raised.exception.details["request_id"])
-        self.bridge.terminal_long_run_decide(raised.exception.details["request_id"], "approve")
-        approval = self.bridge.terminal_long_run_approve("%0", 1,
-            request_id=raised.exception.details["request_id"])
-        result = self.run_command(request_id="approved", resource_class="high_io",
-                                  expected_duration_ms=1000,
-                                  long_run_approval_id=approval["approval_id"])
-        self.assertEqual(result["generation"], 1)
-        self.run_command(request_id="approved", resource_class="high_io",
-                         expected_duration_ms=1000,
-                         long_run_approval_id=approval["approval_id"])
-        self.assertEqual(len(self.bridge.tmux.typed), 1)
+    def test_resource_class_needs_no_approval_and_keeps_dedup(self):
+        for resource in ("high_io", "full_scan"):
+            core = bridge_fixture()
+            params = dict(pane="%0", request_id="resource", text="du /", resource_class=resource, wait_ms=1)
+            first = core.dispatch("terminal_run", params)
+            again = core.dispatch("terminal_run", params)
+            self.assertEqual(first["job_id"], again["job_id"])
+            self.assertEqual(len(core.tmux.typed), 1)
 
     def test_conflict_reserved_restart_and_access_checks(self):
         self.run_command()

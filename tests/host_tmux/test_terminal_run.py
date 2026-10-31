@@ -29,7 +29,7 @@ class TerminalRunHostTest(unittest.TestCase):
                 time.sleep(.01)
         try:
             backend.run("new-session", "-d", "-s", "run", "-x", "150",
-                        "env PS1='STBRUN> ' /bin/bash --noprofile --norc -i")
+                        "env PS1='STBRUN> ' " + shlex.quote(shutil.which('bash')) + " --noprofile --norc -i")
             until(lambda: backend.read("%0", 100).rstrip().endswith("STBRUN>"))
             backend.install_human_binding(pathlib.Path("/tmp/unused-stb-run-test.sock"),
                 pathlib.Path(__file__).resolve().parents[2] / "bridge/local_bridge.py")
@@ -37,6 +37,12 @@ class TerminalRunHostTest(unittest.TestCase):
             result = bridge.dispatch("terminal_run", args)
             self.assertEqual(result["state"], "COMPLETED", result)
             self.assertIn("RUN_OK", result["output_excerpt"]["content"].splitlines())
+            # Modern readline accepts long input; macOS system Bash 3.2 can
+            # truncate it. This is a target-shell limit, not raw stdin framing.
+            long_text = ": '" + "x" * 12000 + "'; printf '%s\\n' 'RAW_QUOTES_\"_\\_中文_OK'"
+            raw = bridge.dispatch("terminal_run", dict(pane="%0", text=long_text, wait_ms=5000))
+            self.assertEqual(raw["state"], "COMPLETED", raw)
+            self.assertIn('RAW_QUOTES_"_\\_中文_OK', raw["output_excerpt"]["content"].splitlines())
             slow = dict(args, request_id="slow", text="sleep 60")
             results, errors = [], []
             def call():

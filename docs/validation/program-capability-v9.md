@@ -1,5 +1,7 @@
 # API v9 程序能力选路验证
 
+> 历史验收：下文记录 2026-09-21 / v0.14.0 的设计，不是当前调用指南。2026-10-31 已移除 Agent input 及 MCP 输入工具，仅提交非交互 CLI 任务，TUI 由人工操作；原来的 Agent 逐键 fallback 不再适用。现行规则见[模型任务接口](../reference/model-tasks.md)。
+
 日期：2026-09-21  
 Bridge/MCP：v0.14.0 / API v9
 

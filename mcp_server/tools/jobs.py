@@ -1,6 +1,6 @@
 """MCP tool declarations for the jobs domain."""
 
-from mcp_server.tools.common import GENERATION, PANE, object_schema
+from mcp_server.tools.common import PANE, object_schema
 
 TOOLS = [
     {

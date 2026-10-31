@@ -8,7 +8,7 @@ try:
     from bridge.common import BridgeError, now, unix_ms
     from bridge.config import (
         CONTEXT_CAPTURE_LINES,
-        LONG_RUN_APPROVAL_MS,
+        MAX_READ_ONLY_STEP_MS,
         TASK_BLOCK_MAX_DURATION_MS,
         TASK_BLOCK_MAX_STEPS,
     )
@@ -17,7 +17,7 @@ except ModuleNotFoundError:
     from common import BridgeError, now, unix_ms
     from config import (
         CONTEXT_CAPTURE_LINES,
-        LONG_RUN_APPROVAL_MS,
+        MAX_READ_ONLY_STEP_MS,
         TASK_BLOCK_MAX_DURATION_MS,
         TASK_BLOCK_MAX_STEPS,
     )
@@ -141,7 +141,7 @@ class TaskBlockService:
             self.bridge._validate_read_only_command(text)
             try:
                 expected = int(step.get("expected_duration_ms", 30_000))
-                if not 1 <= expected <= LONG_RUN_APPROVAL_MS:
+                if not 1 <= expected <= MAX_READ_ONLY_STEP_MS:
                     raise ValueError
             except (TypeError, ValueError) as error:
                 raise BridgeError(

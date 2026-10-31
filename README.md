@@ -6,6 +6,8 @@
 
 让人和 AI 在**同一个真实终端会话**中协作，并把观察、授权、中断和审计变成可控的系统边界。
 
+命令分工：`stb` 面向 Agent 的发现、观察和任务执行；`stb-manage` 面向人的会话创建/进入/停止、daemon、历史与救急清理。只读 `list/info` 两边均可使用。旧管理子命令不再挂在 `stb` 下；这是操作界面分工，不是宿主权限隔离。
+
 Shared Terminal Bridge（STB）是一个本地优先的交互式终端桥接层。人继续使用熟悉的 Terminal、tmux 和 SSH；Codex 或其他 MCP 客户端读取同一个 pane，并只在获得授权时向它输入。STB 不创建第二套隐藏 Shell，也不要求目标机器安装 Agent wrapper。
 
 ![Shared Terminal Bridge：Codex 清理磁盘演示](assets/readme-demo/stb-disk-cleanup-demo.gif)
@@ -14,9 +16,13 @@ Shared Terminal Bridge（STB）是一个本地优先的交互式终端桥接层�
 
 ## 当前版本
 
-首次接入可运行 `stb discover --json` 获取机器可读导航，或 `stb mcp` 查看 MCP 全局注册命令与等待超时配置；两者无需 daemon 在线，不修改配置或执行任务。连接后以 MCP instructions/schema 为准，无需 skill。
+首次接入可运行 `stb discover --json` 获取机器可读导航，或 `stb-manage mcp` 查看 MCP 全局注册命令与等待超时配置；两者无需 daemon 在线，不修改配置或执行任务。连接后以 MCP instructions/schema 为准，无需 skill。
 
-当前稳定版本为 **v0.17.0 / Bridge API v9**，配套 STB-RDC v0.3.1。新增滚屏与输入隔离、内部分页退出、提示符基线持久化及本地任务清理；Agent Ctrl+C 默认等待提示符确认。模型仍使用 run/job ID，无需管理内部授权计数。升级后重启 Bridge，并重连 MCP 刷新说明；无需重建 tmux 会话，重启会撤销旧授权。变更与限制见[版本记录](CHANGELOG.md)。
+CLI 已知会话时优先 `stb bootstrap 会话名`：一次只读返回当前终端、规则和模板，无需再 discover/context。后续用 `stb context 会话名 --lines 20` 刷新画面，`stb info 会话名` 查看面板和任务 ID；结果完整时不额外补读。
+
+简单命令用 `stb run SESSION --text 'df -h /'`；复杂命令用工具按 UTF-8 编码并回验后调用 `stb run SESSION --base64 PAYLOAD`。不手算、不添加首尾换行，仅单行。CLI 启动即提交，不使用 stdin；Codex 在本机用工具编码并回验，MCP 仍直接传 text。后续按 job ID 操作，不因超时重提。
+
+当前稳定版本为 **v0.18.0 / Bridge API v9**，配套 STB-RDC v0.4.0。Agent 只提交 CLI 任务，复杂命令使用工具编码的 Base64；管理功能独立为 stb-manage，旧 stdio/input/审批入口已移除。授权、去重、等待和人工中断由 Core 强制。升级后重启 Bridge 并重连 MCP；不重建 tmux，会撤销旧授权。变更、迁移与验证边界见[版本记录](CHANGELOG.md)。
 
 继续保留 STB-RDC Exclusive Mode contract：用户明确选择 STB-RDC 后，RDC 只承担 transport/bootstrap，目标主机操作
 默认必须经过 STB；独立 RDC capability 需要一次性人工旁路批准。该 contract 让当前
@@ -97,15 +103,15 @@ cd shared-terminal-bridge
 ### 2. 创建并进入托管会话
 
 ```bash
-./stb create disk-check --cwd /path/to/work --enter
+./stb-manage create disk-check --cwd /path/to/work --enter
 ```
 
-`stb create` 在默认 socket 不存在时会自动启动 Bridge daemon。托管 session 默认启用鼠标，并为新 pane 配置 100,000 行历史。
+`stb-manage create` 在默认 socket 不存在时会自动启动 Bridge daemon。托管 session 默认启用鼠标，并为新 pane 配置 100,000 行历史。
 
 如果会话由 MCP 创建，可以在本地一键进入：
 
 ```bash
-./stb enter disk-check
+./stb-manage enter disk-check
 ```
 
 ### 3. 日常管理
@@ -113,11 +119,9 @@ cd shared-terminal-bridge
 ```bash
 ./stb list                          # 列出托管会话
 ./stb info disk-check               # 查看会话、pane 与配置
-./stb history disk-check --limit 50 # 查看 tmux/STB 交互历史
-./stb jobs                          # 查看受监测的终端任务
-./stb approvals                     # 查看长任务批准请求
-./stb daemon status                 # 查看本地 Bridge 状态
-./stb stop disk-check               # 停止并清理托管会话
+./stb-manage history disk-check --limit 50 # 查看 tmux/STB 交互历史
+./stb-manage daemon status                 # 查看本地 Bridge 状态
+./stb-manage stop disk-check               # 停止并清理托管会话
 ```
 
 常用安装方式、daemon 生命周期、人工授权和故障排查见[快速上手](docs/guides/getting-started.md)。完整命令以 `stb --help` 和各子命令的 `--help` 为准。
@@ -126,7 +130,7 @@ cd shared-terminal-bridge
 
 STB 的 MCP server 是 Bridge Unix socket 的 stdio 适配层。它不直接操作 tmux，因此 Pane ACL、lease、generation、Human Override 和审计仍由 Bridge 统一强制。
 
-Codex 直接按 MCP 自发现的 instructions 和工具 schema 使用，不需要 STB skill 或事先阅读仓库文档。观察、run、job 交互与风险审批规则由运行中的 MCP 服务提供。
+Codex 直接按 MCP 自发现的 instructions 和工具 schema 使用，不需要 STB skill 或事先阅读仓库文档。观察、run、job 查询与模型风险确认提示由运行中的 MCP 服务提供。
 
 ```json
 {
@@ -141,9 +145,9 @@ Codex 直接按 MCP 自发现的 instructions 和工具 schema 使用，不需�
 }
 ```
 
-默认 MCP 只提供 Observation；只有显式启用 actions 后才注册任务工具。模型用 `terminal_run` 执行，交互与中断使用 job ID；授权与内部计数由 Core 管理，不再先申请租约。旧模型接口不兼容，升级后重连 MCP。见[当前模型契约](docs/reference/model-tasks.md)。
+默认 MCP 只提供 Observation；只有显式启用 actions 后才注册任务工具。模型用 `terminal_run` 执行，观察与中断使用 job ID；授权与内部计数由 Core 管理，不再先申请租约。旧模型接口不兼容，升级后重连 MCP。见[当前模型契约](docs/reference/model-tasks.md)。
 
-详细工具、Codex Turn Identity、长任务批准和取消语义见[最小 MCP Server](docs/reference/mcp-server.md)。
+详细工具、内部授权、任务等待和取消语义见[最小 MCP Server](docs/reference/mcp-server.md)；高风险确认通过对话完成，不使用 Core 审批凭证。
 
 ## 安全与协作原则
 

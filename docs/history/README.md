@@ -6,6 +6,7 @@
 
 | 日期 | 内容 |
 | --- | --- |
+| 2026-10-31 | [CLI 任务入口、发现与文档收口](changes/2026-10-31-cli-task-simplification.md) |
 | 2026-10-19 | [任务接口、自发现和 v0.16.0 发布](changes/2026-10-19-model-api-release.md) |
 | 2026-10-18 | [执行状态、授权、命令传输阶段记录](changes/2026-10-18-state-and-transport.md) |
 | 2026-09 | [项目演进汇总](project-evolution-2026-09.md) |
