@@ -19,6 +19,21 @@
 `stb run SESSION --base64-chunks CHUNK1 CHUNK2 ... DIGEST16`。将原文按 UTF-8 编码，每 72 字节独立做标准 Base64（每段最多 96 字符），末尾附原始字节 SHA-256 的前 16 个小写十六进制字符。每个数组元素作为独立参数，用空格分隔。接收端逐段严格解码，拼接字节并在提交 Core 前核验摘要，再校验 UTF-8、长度和单行约束。
 
 
+短且易直接传参的命令用 `--text`。超过 200 个 Unicode 字符，或含引号、反斜杠、反引号、美元符的命令，用 `stb bootstrap SESSION` 返回的 Python 示例生成参数。旧 `--base64` 自 v0.19.0 移除。MCP 调用直接传结构化 `text`。
+
+```python
+import base64
+import hashlib
+import shlex
+
+session = "SESSION"
+raw = b"printf '%s' 'hello world'"
+chunks = [base64.b64encode(raw[i:i + 72]).decode("ascii")
+          for i in range(0, len(raw), 72)]
+digest = hashlib.sha256(raw).hexdigest()[:16]
+print(shlex.join(["stb", "run", session, "--base64-chunks", *chunks, digest]))
+```
+
 ## 逻辑请求身份
 
 普通 run 的 request_id 由 Core 自动生成，模型不主动提供；内部显式重试仍按逻辑 request_id 去重。JSON-RPC ID 是传输编号，不能代替命令身份。run 的观察窗口 wait_ms/wait_id 可以改变，命令身份参数必须保持一致。

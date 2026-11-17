@@ -128,6 +128,22 @@ Bridge 不可用且确实需要紧急停止时：
 `--direct` 仍只能停止带 managed 标记的 session。Bridge 下次启动时会清理
 已不存在的托管 session 状态。
 
+## 终端已返回但任务仍显示 RUNNING
+
+用 `stb info SESSION` 核对当前 pane 和 job ID，再用 `stb context SESSION` 看当前画面，用 `stb job JOB_ID` 核对任务状态。终端输出和 Bridge 任务状态是两个观察结果。若命令已结束、画面已回到可输入的提示符，但任务仍是 `RUNNING / EXECUTING` 或新调用报 `TERMINAL_JOB_ALREADY_RUNNING`，由操作者按 pane 清理。任务是否已结束应结合终端画面与操作者确认。
+
+```sh
+stb-manage daemon status
+stb-manage cleanup-tasks --pane %8
+stb-manage cleanup-tasks --pane %8 --yes
+stb-manage daemon status
+stb info local-57
+```
+
+`local-57` 与 `%8` 是实例，执行时使用实时返回的会话和 pane。第一条清理命令只预览。确认后，清理会备份状态、停止 Bridge、删除匹配的未结束任务并重启 Bridge，撤销现有租约。tmux、SSH 和 pane 里的进程继续运行。成功后核对控制 socket 可用，旧 job 不再出现在目标 pane 的当前任务里。备份路径由命令输出。
+
+曾遇到 `daemon status` 同时显示「进程未运行」和「控制 socket 可用」。PID 文件已丢失，旧 Bridge 仍在内存里保留任务。v0.19.0 的清理入口会同时检查磁盘和实时任务，通过控制 socket 核实进程。如果无法唯一确认进程、旧进程未退出或重启后仍有未结束任务，命令会报错。排查时保留命令的原始输出，用 `stb-manage daemon logs` 和 `stb info SESSION` 核对。
+
 ## 安全边界
 
 - 普通 tmux session 不会出现在 `stb list`。
