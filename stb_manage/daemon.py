@@ -107,15 +107,38 @@ def start_bridge_daemon(tmux_socket, bridge_socket):
         tmux(tmux_socket, "kill-session", "-t", bootstrap, check=False)
     raise RuntimeError(f"Bridge 启动失败；请查看 {DEFAULT_LOG_FILE}")
 
+def listening_bridge_pid(socket_path):
+    """Recover the daemon identity from its open Unix socket."""
+    result = subprocess.run(
+        ["lsof", "-nP", "-a", "-u", str(os.getuid()), "-U", "-Fpn"],
+        capture_output=True, text=True, check=False,
+    )
+    pid = None
+    owners = set()
+    for field in result.stdout.splitlines():
+        if field.startswith("p"):
+            pid = int(field[1:])
+        elif field == f"n{socket_path}" and pid is not None:
+            owners.add(pid)
+    if len(owners) != 1:
+        raise RuntimeError(f"无法唯一确认 Bridge socket 的所属进程：{socket_path}")
+    pid = owners.pop()
+    if f"{BRIDGE_SCRIPT} serve " not in process_command(pid):
+        raise RuntimeError(f"Bridge socket 所属进程与本地 Bridge 入口不符（PID {pid}）")
+    return pid
+
+
 def stop_bridge_daemon():
     running, pid = bridge_process_running()
-    if not running:
+    if bridge_available(DEFAULT_BRIDGE_SOCKET):
+        pid = listening_bridge_pid(DEFAULT_BRIDGE_SOCKET)
+    elif not running:
         DEFAULT_PID_FILE.unlink(missing_ok=True)
         return False
     os.kill(pid, 15)
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        if not process_command(pid):
+        if not process_command(pid) and not bridge_available(DEFAULT_BRIDGE_SOCKET):
             DEFAULT_PID_FILE.unlink(missing_ok=True)
             return True
         time.sleep(0.05)

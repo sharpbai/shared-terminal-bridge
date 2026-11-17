@@ -15,7 +15,7 @@
 4. 不要一开始读取整个 `poc/`、完整路线图或全部测试；先打开对应功能域和测试。
 5. 模型接口采用 run/job ID，不保留旧 acquire/submit/generation 契约；Core 内部 Pane ACL、授权计数、Human Override、请求去重仍须严格校验。高风险确认由模型通过对话取得，不在 Core 中维护审批状态机。
 
-- CLI 复杂输入用 --base64：Codex 使用本机工具按 UTF-8 编码并解码回验，不手算、不添加换行。run 已移除 stdio/stdin 参数；MCP text 不受此变更影响。
+- CLI 复杂输入用 --base64-chunks：Codex 使用本机工具按 UTF-8 编码并解码回验，不手算、不添加换行。run 已移除 stdio/stdin 参数；MCP text 不受此变更影响。
 
 ## 代码风格
 

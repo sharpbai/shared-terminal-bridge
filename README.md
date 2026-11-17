@@ -20,9 +20,9 @@ Shared Terminal Bridge（STB）是一个本地优先的交互式终端桥接层�
 
 CLI 已知会话时优先 `stb bootstrap 会话名`：一次只读返回当前终端、规则和模板，无需再 discover/context。后续用 `stb context 会话名 --lines 20` 刷新画面，`stb info 会话名` 查看面板和任务 ID；结果完整时不额外补读。
 
-简单命令用 `stb run SESSION --text 'df -h /'`；复杂命令用工具按 UTF-8 编码并回验后调用 `stb run SESSION --base64 PAYLOAD`。不手算、不添加首尾换行，仅单行。CLI 启动即提交，不使用 stdin；Codex 在本机用工具编码并回验，MCP 仍直接传 text。后续按 job ID 操作，不因超时重提。
+简单命令用 `stb run SESSION --text 'df -h /'`；复杂命令用工具按 UTF-8 编码并回验后调用 `stb run SESSION --base64-chunks CHUNK1 ... DIGEST16`。不手算、不添加首尾换行，仅单行。CLI 启动即提交，不使用 stdin；Codex 在本机用工具编码并回验，MCP 仍直接传 text。后续按 job ID 操作，不因超时重提。
 
-当前稳定版本为 **v0.18.0 / Bridge API v9**，配套 STB-RDC v0.4.0。Agent 只提交 CLI 任务，复杂命令使用工具编码的 Base64；管理功能独立为 stb-manage，旧 stdio/input/审批入口已移除。授权、去重、等待和人工中断由 Core 强制。升级后重启 Bridge 并重连 MCP；不重建 tmux，会撤销旧授权。变更、迁移与验证边界见[版本记录](CHANGELOG.md)。
+当前稳定版本为 **v0.19.0 / Bridge API v9**，配套 STB-RDC v0.5.0。Agent 只提交 CLI 任务，复杂命令使用工具编码的 Base64；管理功能独立为 stb-manage，旧 stdio/input/审批入口已移除。授权、去重、等待和人工中断由 Core 强制。升级后重启 Bridge 并重连 MCP；不重建 tmux，会撤销旧授权。变更、迁移与验证边界见[版本记录](CHANGELOG.md)。
 
 继续保留 STB-RDC Exclusive Mode contract：用户明确选择 STB-RDC 后，RDC 只承担 transport/bootstrap，目标主机操作
 默认必须经过 STB；独立 RDC capability 需要一次性人工旁路批准。该 contract 让当前

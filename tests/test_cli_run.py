@@ -1,5 +1,6 @@
 """CLI text and Base64 converge before one Core run call."""
 import base64
+import hashlib
 import contextlib
 import io
 import json
@@ -7,6 +8,12 @@ import unittest
 from unittest.mock import patch
 from stb_cli.parser import parser
 from stb_cli.commands_execution import handle_execution_command
+
+
+def encoded_chunks(text):
+    raw = text.encode()
+    return [base64.b64encode(raw[i:i+72]).decode()
+            for i in range(0, len(raw), 72)] + [hashlib.sha256(raw).hexdigest()[:16]]
 
 
 class CliRunTest(unittest.TestCase):
@@ -29,7 +36,7 @@ class CliRunTest(unittest.TestCase):
                     parser().parse_args([command, target, flag])
             with patch("stb_cli.commands_execution.bridge_call") as call:
                 with self.assertRaises(RuntimeError):
-                    handle_execution_command(parser().parse_args([command, target, "--base64", "!!"]))
+                    handle_execution_command(parser().parse_args([command, target, "--base64-chunks", "!!"]))
                 call.assert_not_called()
 
     def test_interrupt_is_one_job_bound_call(self):
@@ -50,7 +57,7 @@ class CliRunTest(unittest.TestCase):
         for term in ("200 个 Unicode 字符", "单引号", "双引号",
                      "反斜杠", "反引号", "$"):
             self.assertIn(term, guidance)
-        for term in ("stb run 会话名 --text '命令正文'", "stb run 会话名 --base64 PAYLOAD", "都是 run 的参数"):
+        for term in ("stb run 会话名 --text '命令正文'", "stb run 会话名 --base64-chunks CHUNK1 ... DIGEST16", "都是 run 的参数"):
             self.assertIn(term, guidance)
 
     def test_mcp_run_does_not_require_model_generated_id(self):
@@ -60,7 +67,7 @@ class CliRunTest(unittest.TestCase):
 
     def test_both_modes_preserve_text_and_core_owns_id(self):
         text = r"""printf '%s\n' "$HOME" '中文'"""
-        for options in (["--text", text], ["--base64", base64.b64encode(text.encode()).decode()]):
+        for options in (["--text", text], ["--base64-chunks", *encoded_chunks(text)]):
             calls = []
             def call(socket, method, params=None):
                 calls.append((method, params))

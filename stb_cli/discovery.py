@@ -33,12 +33,12 @@ def discovery(bridge_socket, include_setup=False):
             "list": "不知道会话名时：stb list。",
             "info": "查看面板或找回当前任务 ID：stb info 会话名。",
             "context": "执行前确认画面与实际环境，或人工操作后刷新：stb context 会话名 --lines 40。",
-            "run": "提交命令：stb run 会话名 --text '命令正文' 或 --base64 PAYLOAD；输入规则见 cli_execution。",
+            "run": "提交命令：stb run 会话名 --text '命令正文' 或 --base64-chunks CHUNK1 ... DIGEST16；输入规则见 cli_execution。",
             "job": "立即查询已有任务：stb job JOB_ID。",
             "wait": "继续观察已有任务：stb wait JOB_ID --seconds 60；--seconds 可设 1–600 秒，默认 60，可能提前返回；超时不停止命令，不重交。",
             "interrupt": "中断并等待提示符返回：stb interrupt JOB_ID。",
         },
-        "cli_execution": "执行命令使用 stb run 会话名，并选择一种输入参数：命令不超过 200 个 Unicode 字符，且不含单引号、双引号、反斜杠、反引号或 $ 时，使用 stb run 会话名 --text '命令正文'；其他情况调用本机编码工具按 UTF-8 生成无折行标准 Base64 并解码回验，随后 stb run 会话名 --base64 PAYLOAD。禁止手算 Base64，不添加首尾换行。--text 与 --base64 PAYLOAD 二选一，都是 run 的参数。这是入口选择规则，不是终端长度限制，不影响 MCP 直接传 text；超时不重放。",
+        "cli_execution": "执行命令使用 stb run 会话名，并选择一种输入参数：命令不超过 200 个 Unicode 字符，且不含单引号、双引号、反斜杠、反引号或 $ 时，使用 stb run 会话名 --text '命令正文'；其他情况调用本机编码工具按 UTF-8 生成无折行标准 Base64 并解码回验，随后使用 stb run 会话名 --base64-chunks CHUNK1 ... DIGEST16：UTF-8 原文每 72 字节独立编码，最后附原始字节 SHA-256 前 16 个小写十六进制字符，各元素用空格分隔。禁止手算 Base64，不添加首尾换行。--text 与 --base64-chunks 二选一，都是 run 的参数。这是入口选择规则，不是终端长度限制，不影响 MCP 直接传 text；超时不重放。",
         "human_commands": ["stb list", "stb-manage enter SESSION", "stb-manage daemon status"],
     }
     if not include_setup:

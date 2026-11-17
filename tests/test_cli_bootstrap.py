@@ -44,7 +44,7 @@ class CliBootstrapTest(unittest.TestCase):
         self.assertFalse(result['bootstrap_result']['task_executed'])
         self.assertEqual(result['instructions'], INSTRUCTIONS)
         self.assertIn('context', result['commands'])
-        self.assertEqual(result['request_templates']['run']['base64'], 'stb run ops --base64 PAYLOAD')
+        self.assertEqual(result['request_templates']['run']['base64'], 'stb run ops --base64-chunks CHUNK1 ... DIGEST16')
         self.assertEqual(result['request_templates']['wait'], 'stb wait JOB_ID --seconds 60')
         self.assertIn('1–600', result['commands']['wait'])
         self.assertNotIn('RDC', json.dumps(result))

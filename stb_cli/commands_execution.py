@@ -3,7 +3,7 @@
 import json
 
 from stb_cli.client import bridge_call
-from stb_cli.command_input import decode_command, validate_command
+from stb_cli.command_input import decode_chunks, validate_command
 
 
 EXECUTION_COMMANDS = {
@@ -26,7 +26,10 @@ def handle_execution_command(args):
     if args.command not in EXECUTION_COMMANDS:
         return None
     if args.command == "run":
-        text = decode_command(args.base64) if args.base64 is not None else validate_command(args.text)
+        if args.base64_chunks is not None:
+            text = decode_chunks(args.base64_chunks)
+        else:
+            text = validate_command(args.text)
         session = bridge_call(args.bridge_socket, "terminal_session_resolve", {"name": args.name})
         info = bridge_call(args.bridge_socket, "bridge_info")
         if not info.get("run_auto_request_id"):

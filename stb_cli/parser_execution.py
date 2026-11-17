@@ -2,12 +2,13 @@
 
 
 def add_execution_parsers(subparsers, configure_help):
-    run = configure_help(subparsers.add_parser("run", help="执行一条命令并等待结果",
+    run = configure_help(subparsers.add_parser("run", allow_abbrev=False, help="执行一条命令并等待结果",
         description="执行一条命令并等待结果；输入方式与安全规则见 stb discover --json。"))
     run.add_argument("name", help="托管会话名称")
     source = run.add_mutually_exclusive_group(required=True)
     source.add_argument("--text", help="直接传入单行命令；注意启动 Shell 的转义")
-    source.add_argument("--base64", metavar="PAYLOAD", help="UTF-8 原文的标准 Base64；用工具生成并回验，不折行")
+    source.add_argument("--base64-chunks", nargs="+", metavar="CHUNK_OR_DIGEST",
+                        help="空格分隔的 Base64 短段，最后一个参数为 16 位摘要")
     run.add_argument("--wait-ms", type=int, default=60000)
     run.add_argument("--expected-duration-ms", type=int, default=10000)
     run.add_argument("--resource-class", choices=("normal", "high_io", "full_scan"), default="normal")

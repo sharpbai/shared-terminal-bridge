@@ -5,6 +5,7 @@ import shutil
 import tempfile
 from datetime import datetime
 
+from stb_cli.client import bridge_available, bridge_call
 from stb_cli.config import DEFAULT_STATE_FILE, DEFAULT_BRIDGE_SOCKET
 from stb_manage.daemon import stop_bridge_daemon, start_bridge_daemon
 
@@ -27,17 +28,21 @@ def clear_unfinished(state, pane=None):
 def cleanup(args):
     if args.tmux_socket != 'default' or args.bridge_socket != DEFAULT_BRIDGE_SOCKET:
         raise RuntimeError('清理命令目前仅支持本机默认 Bridge，拒绝修改其他实例。')
-    if not DEFAULT_STATE_FILE.exists():
-        print('没有可清理的任务状态。')
-        return 0
-    state = json.loads(DEFAULT_STATE_FILE.read_text())
-    if state.get('tmux_socket') != 'default':
-        raise RuntimeError('状态文件的 tmux socket 不匹配。')
-    selected = clear_unfinished(state, args.pane)
+    selected = set()
+    if DEFAULT_STATE_FILE.exists():
+        state = json.loads(DEFAULT_STATE_FILE.read_text())
+        if state.get('tmux_socket') != 'default':
+            raise RuntimeError('状态文件的 tmux socket 不匹配。')
+        selected.update(clear_unfinished(state, args.pane))
+    if bridge_available(args.bridge_socket):
+        jobs = bridge_call(args.bridge_socket, 'terminal_job_list')['jobs']
+        selected.update(job['job_id'] for job in jobs
+                        if job.get('execution_phase') == 'EXECUTING'
+                        and (args.pane is None or job['pane'] == args.pane))
     if not selected:
         print('没有匹配的未结束任务。')
         return 0
-    print('待清理任务：' + ', '.join(selected))
+    print('待清理任务：' + ', '.join(sorted(selected)))
     print('仅删除 Bridge 跟踪状态，不停止实际命令。重启将撤销所有当前租约。')
     if not args.yes:
         print('预览模式：确认终端可用后，加 --yes 执行清理。')
@@ -66,5 +71,9 @@ def cleanup(args):
                 os.unlink(temporary)
     finally:
         start_bridge_daemon(args.tmux_socket, args.bridge_socket)
+    jobs = bridge_call(args.bridge_socket, 'terminal_job_list')['jobs']
+    if any(job.get('execution_phase') == 'EXECUTING'
+           and (args.pane is None or job['pane'] == args.pane) for job in jobs):
+        raise RuntimeError('Bridge 重启后仍存在匹配的未结束任务，请核对实时任务状态。')
     print(f'已清理 {len(selected)} 条任务，Bridge 已重启。备份：{backup}')
     return 0

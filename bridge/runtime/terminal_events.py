@@ -116,7 +116,8 @@ class TerminalEventService:
                         prompt=prompt, pane_command=job.get('baseline_pane_command'))
                     job.update(state=('INTERRUPTED_BY_AGENT' if job.get('agent_interrupt_requested_at')
                                       else 'COMPLETED'), execution_phase=FINISHED,
-                               completion_confidence='ordered_prompt_returned', completed_at=now())
+                               completion_confidence='ordered_prompt_returned', completed_at=now(),
+                               attention_reason=None)
                     self.bridge.persist_state()
                     self.bridge._signal_job_waits(job['job_id'], job['state'])
                     self.bridge.record('JOB_STATE', pane=pane, job_id=job['job_id'],

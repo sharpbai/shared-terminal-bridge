@@ -1,5 +1,6 @@
 """Optional sibling contract: raw CLI -> real Unix socket -> Core; no tmux."""
 import base64
+import hashlib
 import contextlib
 import io
 import json
@@ -18,6 +19,12 @@ ADAPTER = Path(__file__).resolve().parents[2] / "shared-terminal-bridge-rdc"
 
 
 @unittest.skipUnless((ADAPTER / "stb_rdc").is_dir(), "requires sibling RDC checkout")
+def encoded_chunks(text):
+    raw = text.encode()
+    return [base64.b64encode(raw[i:i+72]).decode()
+            for i in range(0, len(raw), 72)] + [hashlib.sha256(raw).hexdigest()[:16]]
+
+
 class RdcCoreContractTest(unittest.TestCase):
     @contextlib.contextmanager
     def server(self, lose_run_response=False):
@@ -72,7 +79,7 @@ class RdcCoreContractTest(unittest.TestCase):
         for text in COMMANDS:
             for mode in ("direct", "base64"):
                 with self.subTest(mode=mode, text=text), self.server() as (core, client):
-                    options = ["--text", text] if mode == "direct" else ["--base64", base64.b64encode(text.encode()).decode()]
+                    options = ["--text", text] if mode == "direct" else ["--base64-chunks", *encoded_chunks(text)]
                     with patch("sys.stdin", io.StringIO(text + "\n")):
                         result = run(["run", "test", *options, "--wait-ms", "1"], client)
                     self.assertTrue(result["job_id"])

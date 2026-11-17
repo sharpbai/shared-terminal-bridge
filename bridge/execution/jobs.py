@@ -346,6 +346,8 @@ class JobService:
                 "agent_interrupt_requested_at", "agent_interrupt_id",
             )
         }
+        if job.get("completion_confidence") == "ordered_prompt_returned":
+            result["attention_reason"] = None
         result["elapsed_ms"] = max(0, current_ms - job["submitted_at_ms"])
         result['execution_phase'] = execution_phase(job)
         result["hard_deadline_remaining_ms"] = max(

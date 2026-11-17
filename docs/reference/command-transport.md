@@ -7,11 +7,17 @@
 | 路径 | 传递方式 |
 | --- | --- |
 | Codex → MCP → Core | terminal_run 的 JSON text |
-| ChatGPT → RDC → Adapter → Core | CLI --text 或工具编码的 --base64；Adapter 解码后通过 Unix socket 传原文 text |
+| ChatGPT → RDC → Adapter → Core | CLI --text 或工具编码的 --base64-chunks；Adapter 解码后通过 Unix socket 传原文 text |
 
 每个协议边界只解析一次 JSON。不额外展开美元符、引号和反斜杠，不 trim 命令，不把目标命令拼入本地启动 Shell。无损传输只保证原文，不保证目标语法正确。
 
 真正 CR/LF、NUL、Ctrl+C 等 ASCII 控制字符不作为 run 文本输入；字面量反斜杠转义不自动变成控制键。Agent 仅使用 job interrupt 中断，不提供任意文本/按键回复命令。真正多行执行、自动拆分、目标脚本与 marker 注入均不提供。
+
+
+## Base64 短段拼接
+
+`stb run SESSION --base64-chunks CHUNK1 CHUNK2 ... DIGEST16`。将原文按 UTF-8 编码，每 72 字节独立做标准 Base64（每段最多 96 字符），末尾附原始字节 SHA-256 的前 16 个小写十六进制字符。每个数组元素作为独立参数，用空格分隔。接收端逐段严格解码，拼接字节并在提交 Core 前核验摘要，再校验 UTF-8、长度和单行约束。
+
 
 ## 逻辑请求身份
 

@@ -20,7 +20,7 @@ run 传 pane（CLI/RDC 可传会话名）、单行命令、耗时/资源类别�
 
 ## CLI 文本与 Base64
 
-简单命令用 `stb run SESSION --text 'df -h /'`；长或易转义命令用 `--base64 PAYLOAD`。选择标准：命令不超过 200 个 Unicode 字符且不含引号、反斜杠、反引号或美元符时优先 --text；否则 --base64。用可靠工具按 UTF-8 编码为无折行标准 Base64 并解码回验，不添加首尾换行，不手算。
+简单命令用 `stb run SESSION --text 'df -h /'`；长或易转义命令用 `--base64-chunks CHUNK1 ... DIGEST16`。选择标准：命令不超过 200 个 Unicode 字符且不含引号、反斜杠、反引号或美元符时优先 --text；否则 --base64-chunks。用可靠工具按 UTF-8 编码为无折行标准 Base64 并解码回验，不添加首尾换行，不手算。
 
 input CLI 与 terminal_input_job MCP 工具已移除，模型仅提交 CLI 任务；遇到交互提示或 TUI 交人工处理，不用新 run 伪装回复。stdio/stdin 参数已删除。解码内容仍须非空、单行、无控制字符且最多 65536 UTF-8 字节。MCP 直接传原文 text，无需编码；Base64 仅在 CLI 解码后交给 Core。RDC 同样一次启动提交并收集原 PID，不发送 stdin。
 
